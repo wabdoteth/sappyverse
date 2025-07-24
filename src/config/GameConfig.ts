@@ -1,8 +1,8 @@
 export const GAME_CONFIG = {
   // Display settings
-  BASE_WIDTH: 640,
-  BASE_HEIGHT: 360,
-  SCALE_FACTOR: 2,
+  BASE_WIDTH: 1280,
+  BASE_HEIGHT: 720,
+  SCALE_FACTOR: 1,
   
   // Colors - Muted earth tones palette
   COLORS: {
@@ -24,8 +24,8 @@ export const GAME_CONFIG = {
   CAMERA_LERP: 0.1,
   
   // Town settings
-  TOWN_WIDTH: 640,
-  TOWN_HEIGHT: 480,
+  TOWN_WIDTH: 1600,
+  TOWN_HEIGHT: 1200,
   
   // Pixel perfect settings
   PIXEL_ART: true,

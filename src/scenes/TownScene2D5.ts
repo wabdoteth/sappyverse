@@ -1,12 +1,17 @@
 import Phaser from 'phaser';
 import { GAME_CONFIG } from '../config/GameConfig';
 import { Player } from '../entities/Player';
+import { NPC } from '../entities/NPC';
+import { DialogueSystem } from '../systems/DialogueSystem';
+import { SpriteGenerator } from '../utils/SpriteGenerator';
 
 export class TownScene2D5 extends Phaser.Scene {
   private groundLayer!: Phaser.GameObjects.Container;
   private objectLayer!: Phaser.GameObjects.Container;
   private depthSortGroup!: Phaser.GameObjects.Group;
   private player!: Player;
+  private npcs: NPC[] = [];
+  private dialogueSystem!: DialogueSystem;
   
   constructor() {
     super({ key: 'TownScene2D5' });
@@ -15,8 +20,15 @@ export class TownScene2D5 extends Phaser.Scene {
   create(): void {
     console.log('TownScene2D5: Creating 2.5D scene...');
     
+    // Reset camera in case it was faded out
+    this.cameras.main.fadeIn(500, 0, 0, 0);
+    
     // Set background color
     this.cameras.main.setBackgroundColor(0x87CEEB); // Sky blue
+    console.log('TownScene2D5: Background color set');
+    
+    // Generate NPC sprites
+    SpriteGenerator.generateAllNPCSprites(this);
     
     // Create containers for layering
     this.groundLayer = this.add.container(0, 0);
@@ -37,6 +49,12 @@ export class TownScene2D5 extends Phaser.Scene {
     // Add player
     this.createPlayer();
     
+    // Add NPCs
+    this.createNPCs();
+    
+    // Set up dialogue system
+    this.dialogueSystem = new DialogueSystem(this);
+    
     // Set up camera
     this.cameras.main.setZoom(1);
   }
@@ -44,7 +62,7 @@ export class TownScene2D5 extends Phaser.Scene {
   private createPerspectiveGround(): void {
     const graphics = this.add.graphics();
     const centerX = GAME_CONFIG.BASE_WIDTH / 2;
-    const horizonY = 100;
+    const horizonY = 150;
     const groundHeight = GAME_CONFIG.BASE_HEIGHT - horizonY;
     
     // Create gradient ground
@@ -74,17 +92,17 @@ export class TownScene2D5 extends Phaser.Scene {
     
     // Vertical lines (converging to horizon)
     const vanishingX = centerX;
-    const vanishingY = horizonY - 20;
+    const vanishingY = horizonY - 30;
     
-    for (let x = -8; x <= 8; x++) {
+    for (let x = -10; x <= 10; x++) {
       if (x === 0) continue; // Skip center line
       
-      const startX = centerX + (x * 40);
+      const startX = centerX + (x * 80);
       const startY = GAME_CONFIG.BASE_HEIGHT;
       
       graphics.beginPath();
       graphics.moveTo(startX, startY);
-      graphics.lineTo(vanishingX + (x * 5), vanishingY);
+      graphics.lineTo(vanishingX + (x * 8), vanishingY);
       graphics.strokePath();
     }
     
@@ -128,17 +146,23 @@ export class TownScene2D5 extends Phaser.Scene {
     return Phaser.Display.Color.GetColor(r, g, b);
   }
 
+  private buildingPositions: Array<{x: number, z: number, name: string, role: string}> = [];
+  
   private createPerspectiveBuildings(): void {
     const buildings = [
-      { x: -100, z: 30, name: 'Blacksmith', color: 0x8B4513 },
-      { x: 100, z: 35, name: 'Apothecary', color: 0x2F4F4F },
-      { x: -70, z: 100, name: 'Archivist', color: 0x4B0082 },
-      { x: 70, z: 110, name: 'Gatekeeper', color: 0x696969 }
+      { x: -400, z: 60, name: 'Blacksmith', color: 0x8B4513, role: 'blacksmith' },
+      { x: 400, z: 65, name: 'Apothecary', color: 0x2F4F4F, role: 'apothecary' },
+      { x: -350, z: 180, name: 'Archivist', color: 0x4B0082, role: 'archivist' },
+      { x: 350, z: 190, name: 'Gatekeeper', color: 0x696969, role: 'gatekeeper' }
     ];
     
-    buildings.forEach(({ x, z, name, color }) => {
+    buildings.forEach(({ x, z, name, color, role }) => {
       const building = this.createIsometricBuilding(x, z, name, color);
       this.depthSortGroup.add(building);
+      
+      // Store position for NPC placement - to the side of building
+      const npcOffset = role === 'blacksmith' || role === 'archivist' ? 50 : -50;
+      this.buildingPositions.push({ x: x + npcOffset, z: z + 10, name, role });
     });
   }
 
@@ -149,9 +173,9 @@ export class TownScene2D5 extends Phaser.Scene {
     const container = this.add.container(screenX, screenY);
     
     // Building base (front face)
-    const width = 50;
-    const height = 40;
-    const depth = 25;
+    const width = 80;
+    const height = 60;
+    const depth = 40;
     
     // Create building faces for 2.5D effect
     const graphics = this.add.graphics();
@@ -184,10 +208,10 @@ export class TownScene2D5 extends Phaser.Scene {
     
     // Add label
     const text = this.add.text(0, -height/2, name, {
-      fontSize: '14px',
+      fontSize: '18px',
       color: '#ffffff',
       backgroundColor: '#000000',
-      padding: { x: 4, y: 2 }
+      padding: { x: 6, y: 3 }
     });
     text.setOrigin(0.5, 0.5);
     container.add(text);
@@ -201,12 +225,14 @@ export class TownScene2D5 extends Phaser.Scene {
   private createPerspectiveProps(): void {
     // Add trees with 2.5D perspective
     const trees = [
-      { x: -120, z: 15 },
-      { x: 120, z: 20 },
-      { x: -50, z: 65 },
-      { x: 40, z: 140 },
-      { x: -90, z: 120 },
-      { x: 90, z: 80 }
+      { x: -500, z: 30 },
+      { x: 500, z: 35 },
+      { x: -250, z: 100 },
+      { x: 250, z: 110 },
+      { x: -450, z: 150 },
+      { x: 450, z: 160 },
+      { x: -150, z: 200 },
+      { x: 150, z: 210 }
     ];
     
     trees.forEach(({ x, z }) => {
@@ -230,13 +256,13 @@ export class TownScene2D5 extends Phaser.Scene {
     const container = this.add.container(screenX, screenY);
     
     // Tree trunk
-    const trunk = this.add.rectangle(0, -10, 8, 20, 0x4B3410);
+    const trunk = this.add.rectangle(0, -15, 12, 30, 0x4B3410);
     container.add(trunk);
     
     // Tree foliage (multiple circles for depth)
-    const foliage1 = this.add.circle(0, -25, 15, 0x228B22);
-    const foliage2 = this.add.circle(-5, -20, 12, 0x2E7D32);
-    const foliage3 = this.add.circle(5, -22, 13, 0x1B5E20);
+    const foliage1 = this.add.circle(0, -35, 22, 0x228B22);
+    const foliage2 = this.add.circle(-8, -28, 18, 0x2E7D32);
+    const foliage3 = this.add.circle(8, -32, 20, 0x1B5E20);
     
     container.add([foliage1, foliage2, foliage3]);
     container.setDepth(screenY);
@@ -249,15 +275,15 @@ export class TownScene2D5 extends Phaser.Scene {
     const container = this.add.container(screenX, screenY);
     
     // Lamp post
-    const post = this.add.rectangle(0, -12, 6, 24, 0x4a4a4a);
+    const post = this.add.rectangle(0, -20, 10, 40, 0x4a4a4a);
     container.add(post);
     
     // Lamp light
-    const light = this.add.circle(0, -24, 8, 0xFFD700);
+    const light = this.add.circle(0, -40, 12, 0xFFD700);
     container.add(light);
     
     // Glow effect
-    const glow = this.add.circle(0, -24, 18, 0xFFD700, 0.3);
+    const glow = this.add.circle(0, -40, 28, 0xFFD700, 0.3);
     container.add(glow);
     
     // Animate glow
@@ -289,6 +315,9 @@ export class TownScene2D5 extends Phaser.Scene {
       frameWidth: 96,  // Frame width (character is centered in this)
       frameHeight: 80  // Frame height
     });
+    
+    // Reset player health and state when entering town
+    this.player.reset();
     
     // Add player to depth sort group
     this.depthSortGroup.add(this.player);
@@ -358,17 +387,107 @@ export class TownScene2D5 extends Phaser.Scene {
     this.depthSortGroup.add(playerContainer);
   }
   
+  private createNPCs(): void {
+    this.buildingPositions.forEach(({ x, z, name, role }) => {
+      const { x: screenX, y: screenY } = this.worldToScreen(x, z);
+      
+      const npc = new NPC({
+        scene: this,
+        x: screenX,
+        y: screenY,
+        name: name,
+        role: role as 'blacksmith' | 'apothecary' | 'archivist' | 'gatekeeper'
+      });
+      
+      this.npcs.push(npc);
+      this.depthSortGroup.add(npc);
+    });
+    
+    // Set up E key for interaction
+    const eKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    eKey.on('down', () => {
+      // Don't interact if dialogue is already active
+      if (this.dialogueSystem.isDialogueActive()) return;
+      
+      // Find the nearest NPC that can be interacted with
+      for (const npc of this.npcs) {
+        if (npc.canInteract()) {
+          this.interactWithNPC(npc);
+          break;
+        }
+      }
+    });
+  }
+  
+  private interactWithNPC(npc: NPC): void {
+    // Show dialogue based on NPC
+    const dialogues = {
+      blacksmith: {
+        id: 'blacksmith_greeting',
+        speaker: 'Blacksmith',
+        text: 'Welcome to my forge! Your gear looks like it could use some work.',
+        portrait: 'portrait_blacksmith',
+        choices: [
+          { text: 'Repair my equipment', action: 'open_repair' },
+          { text: 'Upgrade my weapons', action: 'open_upgrade' },
+          { text: 'Just browsing', action: 'close' }
+        ]
+      },
+      apothecary: {
+        id: 'apothecary_greeting',
+        speaker: 'Apothecary',
+        text: 'Ah, an adventurer! I have potions and elixirs that might help you survive the Wilds.',
+        portrait: 'portrait_apothecary',
+        choices: [
+          { text: 'Show me your potions', action: 'open_shop' },
+          { text: 'Tell me about the Wilds', nextDialogue: 'apothecary_wilds' },
+          { text: 'Maybe later', action: 'close' }
+        ]
+      },
+      archivist: {
+        id: 'archivist_greeting',
+        speaker: 'Archivist',
+        text: 'Knowledge is the key to survival. What wisdom do you seek?',
+        portrait: 'portrait_archivist',
+        choices: [
+          { text: 'Learn new skills', action: 'open_skills' },
+          { text: 'Tell me about the curse', nextDialogue: 'archivist_curse' },
+          { text: 'Nothing right now', action: 'close' }
+        ]
+      },
+      gatekeeper: {
+        id: 'gatekeeper_greeting',
+        speaker: 'Gatekeeper',
+        text: 'The Withering Wilds await beyond this gate. Are you prepared to face the endless depths?',
+        portrait: 'portrait_gatekeeper',
+        choices: [
+          { text: 'Enter the Wilds', action: 'enter_dungeon' },
+          { text: 'What should I expect?', nextDialogue: 'gatekeeper_info' },
+          { text: 'Not yet', action: 'close' }
+        ]
+      }
+    };
+    
+    const dialogue = dialogues[npc.role as keyof typeof dialogues];
+    if (dialogue) {
+      this.dialogueSystem.showDialogue(dialogue);
+    } else {
+      // Fallback for NPCs without specific dialogue
+      npc.interact();
+    }
+  }
+  
   private worldToScreen(worldX: number, worldZ: number): { x: number, y: number } {
     // Convert 3D world coordinates to 2.5D screen coordinates
     const centerX = GAME_CONFIG.BASE_WIDTH / 2;
-    const baseY = 240; // Base ground level
+    const baseY = 400; // Base ground level
     
     // Perspective scaling based on Z depth
-    const perspectiveScale = 1 - (worldZ / 200);
+    const perspectiveScale = 1 - (worldZ / 400);
     
     // Calculate screen position
     const screenX = centerX + (worldX * perspectiveScale);
-    const screenY = baseY - (worldZ * 0.5); // Move up as we go back in Z
+    const screenY = baseY - (worldZ * 0.7); // Move up as we go back in Z
     
     return { x: screenX, y: screenY };
   }

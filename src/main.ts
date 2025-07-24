@@ -5,6 +5,7 @@ import { PreloadScene } from './scenes/PreloadScene';
 import { TownScene } from './scenes/TownScene';
 import { SimpleTownScene } from './scenes/SimpleTownScene';
 import { TownScene2D5 } from './scenes/TownScene2D5';
+import { DungeonScene } from './scenes/DungeonScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -32,7 +33,7 @@ const config: Phaser.Types.Core.GameConfig = {
     target: 60,
     forceSetTimeOut: true
   },
-  scene: [BootScene, PreloadScene, TownScene, SimpleTownScene, TownScene2D5]
+  scene: [BootScene, PreloadScene, TownScene, SimpleTownScene, TownScene2D5, DungeonScene]
 };
 
 try {
