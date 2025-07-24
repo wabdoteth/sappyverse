@@ -244,9 +244,14 @@ export class DialogueSystem {
       case 'open_skills':
         console.log('Opening skills menu...');
         break;
+      case 'open_meta_upgrades':
+        console.log('Opening meta upgrades menu...');
+        this.scene.scene.launch('MetaUpgradeScene');
+        this.closeDialogue();
+        break;
       case 'enter_dungeon':
         console.log('Entering dungeon...');
-        this.scene.scene.start('DungeonScene', { depth: 1 });
+        this.scene.scene.start('CombatFlowScene', { depth: 1 });
         break;
       default:
         console.log(`Unknown action: ${action}`);

@@ -19,8 +19,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite implements CombatEntity
   
   // Combat properties
   public id: string = 'player';
-  public hp: number = 100;
-  public maxHp: number = 100;
+  public hp: number = 10;
+  public maxHp: number = 10;
   public damage: number = 20;
   public rpsType: RPSType = 'melee';
   public currentWeaponType: RPSType = 'melee';

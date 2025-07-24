@@ -135,6 +135,48 @@ export class ProceduralGeneration {
       minDepth: 1,
       enemyCount: { min: 0, max: 0 }
     });
+    
+    // Rest room with healing fountain
+    this.roomTemplates.set('rest_fountain_1', {
+      id: 'rest_fountain_1',
+      type: 'rest',
+      biome: 'rotwood',
+      layout: [
+        [1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,2,0,0,2,0,0,1],
+        [1,0,0,0,3,3,0,0,0,1], // 3 = healing fountain
+        [1,0,0,0,3,3,0,0,0,1],
+        [1,0,0,2,0,0,2,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1]
+      ],
+      enemySpawnPoints: [],
+      minDepth: 1,
+      enemyCount: { min: 0, max: 0 }
+    });
+    
+    // Shop room
+    this.roomTemplates.set('shop_basic_1', {
+      id: 'shop_basic_1',
+      type: 'shop',
+      biome: 'rotwood',
+      layout: [
+        [1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,2,0,0,0,0,2,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,2,0,0,0,0,0,0,2,1], // Corners for shop displays
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,2,0,0,0,0,2,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1]
+      ],
+      enemySpawnPoints: [],
+      minDepth: 1,
+      enemyCount: { min: 0, max: 0 }
+    });
   }
   
   static generateRoomLayout(depth: number, biome: BiomeType = 'rotwood'): RoomTemplate {
@@ -154,10 +196,37 @@ export class ProceduralGeneration {
     const weights = validTemplates.map(template => {
       if (template.type === 'elite' && depth >= 5) return 2;
       if (template.type === 'treasure' && depth % 3 === 0) return 3;
-      return 5; // Combat rooms are most common
+      if (template.type === 'rest' && depth % 4 === 0) return 4;
+      if (template.type === 'shop' && depth % 5 === 0) return 2;
+      if (template.type === 'combat') return 5;
+      return 1; // Other types are rare
     });
     
     return this.weightedRandom(validTemplates, weights);
+  }
+  
+  static generateCombatRoom(depth: number, biome: BiomeType = 'rotwood'): RoomTemplate {
+    // Filter templates to only include combat and elite room types
+    const combatTemplates = Array.from(this.roomTemplates.values()).filter(template => {
+      return (template.type === 'combat' || template.type === 'elite') &&
+             template.biome === biome && 
+             template.minDepth <= depth && 
+             (!template.maxDepth || template.maxDepth >= depth);
+    });
+    
+    if (combatTemplates.length === 0) {
+      // Fallback to basic combat room if no valid templates found
+      return this.roomTemplates.get('rotwood_basic_1')!;
+    }
+    
+    // Weighted selection favoring combat rooms over elite rooms
+    const weights = combatTemplates.map(template => {
+      if (template.type === 'elite' && depth >= 5) return 2; // Elite rooms are less common
+      if (template.type === 'combat') return 5; // Combat rooms are more common
+      return 1;
+    });
+    
+    return this.weightedRandom(combatTemplates, weights);
   }
   
   static generateDungeonMap(depth: number, roomCount: number = 3): RoomNode[] {
@@ -281,12 +350,20 @@ export class ProceduralGeneration {
               y: worldY
             });
             break;
-          case 3: // Hazard
-            features.push({
-              type: template.biome === 'rotwood' ? 'poison_pool' : 'spike_trap',
-              x: worldX,
-              y: worldY
-            });
+          case 3: // Hazard or special feature
+            if (template.type === 'rest') {
+              features.push({
+                type: 'healing_fountain',
+                x: worldX,
+                y: worldY
+              });
+            } else {
+              features.push({
+                type: template.biome === 'rotwood' ? 'poison_pool' : 'spike_trap',
+                x: worldX,
+                y: worldY
+              });
+            }
             break;
         }
       }

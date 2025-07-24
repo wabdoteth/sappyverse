@@ -6,6 +6,13 @@ import { TownScene } from './scenes/TownScene';
 import { SimpleTownScene } from './scenes/SimpleTownScene';
 import { TownScene2D5 } from './scenes/TownScene2D5';
 import { DungeonScene } from './scenes/DungeonScene';
+import { DungeonSceneTurnBased } from './scenes/DungeonSceneTurnBased';
+import { TurnBasedCombatSystem } from './systems/TurnBasedCombatSystem';
+import { CombatEncounterScene } from './scenes/CombatEncounterScene';
+import { UpgradeCardSelectionScene } from './scenes/UpgradeCardSelectionScene';
+import { MetaUpgradeScene } from './scenes/MetaUpgradeScene';
+import { CombatFlowScene } from './scenes/CombatFlowScene';
+import { PostCombatExplorationScene } from './scenes/PostCombatExplorationScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -33,7 +40,7 @@ const config: Phaser.Types.Core.GameConfig = {
     target: 60,
     forceSetTimeOut: true
   },
-  scene: [BootScene, PreloadScene, TownScene, SimpleTownScene, TownScene2D5, DungeonScene]
+  scene: [BootScene, PreloadScene, TownScene, SimpleTownScene, TownScene2D5, DungeonScene, DungeonSceneTurnBased, TurnBasedCombatSystem, CombatEncounterScene, UpgradeCardSelectionScene, MetaUpgradeScene, CombatFlowScene, PostCombatExplorationScene]
 };
 
 try {

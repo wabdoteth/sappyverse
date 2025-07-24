@@ -16,6 +16,15 @@ export class TownScene2D5 extends Phaser.Scene {
   constructor() {
     super({ key: 'TownScene2D5' });
   }
+  
+  init(data: { runComplete?: boolean; shardsEarned?: number }): void {
+    // Show run complete message if returning from dungeon
+    if (data && data.runComplete && data.shardsEarned) {
+      this.time.delayedCall(500, () => {
+        this.showRunCompleteMessage(data.shardsEarned);
+      });
+    }
+  }
 
   create(): void {
     console.log('TownScene2D5: Creating 2.5D scene...');
@@ -447,10 +456,10 @@ export class TownScene2D5 extends Phaser.Scene {
       archivist: {
         id: 'archivist_greeting',
         speaker: 'Archivist',
-        text: 'Knowledge is the key to survival. What wisdom do you seek?',
+        text: 'The shards you collect hold ancient power. Would you like to invest them?',
         portrait: 'portrait_archivist',
         choices: [
-          { text: 'Learn new skills', action: 'open_skills' },
+          { text: 'View permanent upgrades', action: 'open_meta_upgrades' },
           { text: 'Tell me about the curse', nextDialogue: 'archivist_curse' },
           { text: 'Nothing right now', action: 'close' }
         ]
@@ -495,5 +504,62 @@ export class TownScene2D5 extends Phaser.Scene {
   update(): void {
     // Depth sorting is now handled by setting depth once when objects are created
     // No need to update every frame
+  }
+  
+  private showRunCompleteMessage(shardsEarned: number): void {
+    // Create message container
+    const container = this.add.container(GAME_CONFIG.BASE_WIDTH / 2, GAME_CONFIG.BASE_HEIGHT / 2);
+    
+    // Background panel
+    const bg = this.add.rectangle(0, 0, 400, 200, 0x2a2a3e);
+    bg.setStrokeStyle(3, 0xffd700);
+    
+    // Title
+    const title = this.add.text(0, -50, 'Run Complete!', {
+      fontSize: '32px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    });
+    title.setOrigin(0.5);
+    
+    // Shards earned
+    const shardsText = this.add.text(0, 0, `Shards Earned: ${shardsEarned}`, {
+      fontSize: '24px',
+      color: '#ffd700'
+    });
+    shardsText.setOrigin(0.5);
+    
+    // Hint text
+    const hintText = this.add.text(0, 40, 'Visit the Archivist to spend shards', {
+      fontSize: '16px',
+      color: '#cccccc'
+    });
+    hintText.setOrigin(0.5);
+    
+    container.add([bg, title, shardsText, hintText]);
+    
+    // Fade in
+    container.setAlpha(0);
+    this.tweens.add({
+      targets: container,
+      alpha: 1,
+      duration: 500
+    });
+    
+    // Auto-dismiss after delay
+    this.time.delayedCall(3000, () => {
+      this.tweens.add({
+        targets: container,
+        alpha: 0,
+        duration: 500,
+        onComplete: () => container.destroy()
+      });
+    });
+    
+    // Click to dismiss
+    bg.setInteractive();
+    bg.on('pointerdown', () => {
+      container.destroy();
+    });
   }
 }
