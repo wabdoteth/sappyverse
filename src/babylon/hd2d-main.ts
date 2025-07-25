@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <button id="toggleDOF" style="display: block; margin: 5px 0; width: 100%;">Enable Depth of Field</button>
             <button id="toggleBloom" style="display: block; margin: 5px 0; width: 100%;">Enable Bloom</button>
             <button id="toggleCollisions" style="display: block; margin: 5px 0; width: 100%;">Hide Collision Debug</button>
+            <button id="toggleOutlines" style="display: block; margin: 5px 0; width: 100%;">Enable HD-2D Outlines</button>
             <button id="toggleParticles" style="display: block; margin: 5px 0; width: 100%;">Disable Particles</button>
             <button id="toggleFog" style="display: block; margin: 5px 0; width: 100%;">Disable Fog</button>
             <hr style="margin: 10px 0;">
@@ -85,6 +86,14 @@ document.addEventListener('DOMContentLoaded', () => {
             collisionsVisible = !collisionsVisible;
             game.toggleDebugVisuals(collisionsVisible);
             (e.target as HTMLButtonElement).textContent = collisionsVisible ? 'Hide Collision Debug' : 'Show Collision Debug';
+        });
+        
+        // HD-2D Outlines toggle
+        let outlinesEnabled = false; // Off by default as per HD2DGame
+        document.getElementById('toggleOutlines')?.addEventListener('click', (e) => {
+            outlinesEnabled = !outlinesEnabled;
+            game.toggleOutlines(outlinesEnabled);
+            (e.target as HTMLButtonElement).textContent = outlinesEnabled ? 'Disable HD-2D Outlines' : 'Enable HD-2D Outlines';
         });
         
         // Particles toggle

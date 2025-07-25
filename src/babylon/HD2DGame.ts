@@ -34,6 +34,7 @@ import { HD2DAnimatedSprite } from './HD2DAnimatedSprite';
 import { HD2DParticles } from './effects/HD2DParticles';
 import { ParallaxBackground } from './effects/ParallaxBackground';
 import { SpriteOutlineSimple } from './effects/SpriteOutlineSimple';
+import { HD2DOutlineSystem } from './materials/HD2DOutlineMaterial';
 import { TimeOfDaySystem } from './systems/TimeOfDaySystem';
 import { HD2DUISystem } from './ui/HD2DUISystem';
 import { createAllNPCPortraits } from './utils/createNPCPortraits';
@@ -128,11 +129,20 @@ export class HD2DGame {
     // Debug
     private debugMeshes: Mesh[] = [];
     private playerDebugLine: Mesh | null = null;
+    private outlineEnabled: boolean = false;
+    
+    // Public method to add outline to a sprite
+    public addOutlineToSprite(sprite: Mesh): void {
+        if (this.hd2dOutlineSystem && this.outlineEnabled) {
+            this.hd2dOutlineSystem.addOutlineToSprite(sprite);
+        }
+    }
     
     // Effects
     private hd2dParticles: HD2DParticles;
     private parallaxBackground: ParallaxBackground;
     private spriteOutline: SpriteOutlineSimple;
+    private hd2dOutlineSystem: HD2DOutlineSystem;
     
     // Systems
     public timeOfDaySystem: TimeOfDaySystem; // Made public for debug access
@@ -320,23 +330,33 @@ export class HD2DGame {
         this.hd2dParticles.createMagicalSparkles();
         this.hd2dParticles.start();
         
-        // Create sprite outline system - disabled for now due to rendering issues
-        // this.spriteOutline = new SpriteOutlineSimple(this.scene);
+        // Create HD-2D outline system
+        this.hd2dOutlineSystem = new HD2DOutlineSystem(this.scene);
         
-        // Add outlines to sprites after scene loads
-        // setTimeout(() => {
-        //     // Add outline to player
-        //     if (this.player && this.player.mesh) {
-        //         this.spriteOutline.addOutline(this.player.mesh, new Color3(0, 0, 0), 2);
-        //     }
+        // Apply outlines to sprites after a longer delay to ensure NPCs are fully loaded
+        setTimeout(() => {
+            // Add outline to player
+            if (this.player && this.player.mesh) {
+                console.log('Adding outline to player');
+                this.hd2dOutlineSystem.addOutlineToSprite(this.player.mesh);
+            }
             
-        //     // Add outlines to NPCs
-        //     this.townScene.getNPCs().forEach(npc => {
-        //         if (npc.mesh) {
-        //             this.spriteOutline.addOutline(npc.mesh, new Color3(0, 0, 0), 1);
-        //         }
-        //     });
-        // }, 100);
+            // Add outlines to NPCs
+            const npcs = this.townScene.getNPCs();
+            console.log(`Found ${npcs.length} NPCs`);
+            npcs.forEach(npc => {
+                if (npc.mesh) {
+                    console.log(`Adding outline to NPC: ${npc.name}, mesh name: ${npc.mesh.name}`);
+                    this.hd2dOutlineSystem.addOutlineToSprite(npc.mesh);
+                } else {
+                    console.warn(`NPC ${npc.name} has no mesh`);
+                }
+            });
+            
+            // Set initial state
+            this.hd2dOutlineSystem.setEnabled(this.outlineEnabled);
+            console.log(`Outlines enabled: ${this.outlineEnabled}`);
+        }, 1000);
         
         // Create debug visualization
         this.createDebugVisuals();
@@ -779,6 +799,14 @@ export class HD2DGame {
         const fountainWater = this.townScene?.getFountainWaterFlow();
         if (fountainWater) {
             fountainWater.setEnabled(enabled);
+        }
+    }
+    
+    public toggleOutlines(enabled: boolean): void {
+        this.outlineEnabled = enabled;
+        if (this.hd2dOutlineSystem) {
+            this.hd2dOutlineSystem.setEnabled(enabled);
+            console.log(`HD-2D Outlines: ${enabled ? 'ON' : 'OFF'}`);
         }
     }
     
