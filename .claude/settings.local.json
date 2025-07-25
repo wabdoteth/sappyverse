@@ -9,7 +9,19 @@
       "Bash(node:*)",
       "Bash(ls:*)",
       "Bash(rm:*)",
-      "WebFetch(domain:doc.babylonjs.com)"
+      "WebFetch(domain:doc.babylonjs.com)",
+      "Bash(claude --debug)",
+      "Bash(find:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(tree:*)",
+      "Bash(if [ -f package-lock.json ])",
+      "Bash(then rm package-lock.json)",
+      "Bash(else echo \"No package-lock.json found\")",
+      "Bash(fi)",
+      "Bash(if [ -f yarn.lock ])",
+      "Bash(then rm yarn.lock)",
+      "Bash(else echo \"No yarn.lock found\")"
     ],
     "deny": []
   }

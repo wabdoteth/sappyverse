@@ -15,10 +15,14 @@ import { Sprite } from '@babylonjs/core/Sprites/sprite';
 
 // Required side effects
 import '@babylonjs/core/Meshes/meshBuilder';
+import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
 
 // Post-processing
 import { DefaultRenderingPipeline } from '@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline';
 import { DepthOfFieldEffectBlurLevel } from '@babylonjs/core/PostProcesses/depthOfFieldEffect';
+
+// Shadows
+import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 
 // GUI
 import { AdvancedDynamicTexture } from '@babylonjs/gui/2D/advancedDynamicTexture';
@@ -34,6 +38,7 @@ export class TownScene extends Scene {
   private camera!: UniversalCamera;
   private pipeline!: DefaultRenderingPipeline;
   private gui!: AdvancedDynamicTexture;
+  private shadowGenerator!: ShadowGenerator;
   
   constructor(engine: Engine) {
     super(engine);
@@ -88,16 +93,30 @@ export class TownScene extends Scene {
   }
   
   private setupLighting(): void {
-    // Ambient light
+    // Ambient light - increased for better sprite visibility
     const ambient = new HemisphericLight('ambient', new Vector3(0, 1, 0), this);
-    ambient.intensity = 0.6;
+    ambient.intensity = 0.5;
     ambient.diffuse = new Color3(0.9, 0.9, 1);
     ambient.groundColor = new Color3(0.3, 0.3, 0.4);
     
-    // Directional light (sun)
-    const sun = new DirectionalLight('sun', new Vector3(-1, -2, -1), this);
-    sun.intensity = 0.8;
+    // Directional light (sun) - simulating sun from lower left casting shadows upper right
+    const sun = new DirectionalLight('sun', new Vector3(1, -2, 1).normalize(), this);
+    sun.position = new Vector3(-10, 20, -10);
+    sun.intensity = 1.2;
     sun.diffuse = new Color3(1, 0.95, 0.8);
+    sun.specular = new Color3(1, 1, 1);
+    sun.shadowMinZ = 1;
+    sun.shadowMaxZ = 100;
+    
+    // Setup shadow generator
+    this.shadowGenerator = new ShadowGenerator(2048, sun);
+    this.shadowGenerator.useBlurExponentialShadowMap = true;
+    this.shadowGenerator.blurScale = 2;
+    this.shadowGenerator.setDarkness(0.3);
+    this.shadowGenerator.bias = 0.01;
+    
+    // Enable shadows in the scene
+    this.shadowsEnabled = true;
   }
   
   private createTownEnvironment(): void {
@@ -112,6 +131,7 @@ export class TownScene extends Scene {
     groundMat.diffuseColor = new Color3(0.3, 0.5, 0.3);
     groundMat.specularColor = new Color3(0, 0, 0);
     ground.material = groundMat;
+    ground.receiveShadows = true;
     
     // Create simple buildings with HD-2D style
     this.createBuilding('shop', new Vector3(-10, 0, 5), 6, 8, 6);
@@ -161,6 +181,12 @@ export class TownScene extends Scene {
     const roofMat = new StandardMaterial(`${name}RoofMat`, this);
     roofMat.diffuseColor = new Color3(0.8, 0.3, 0.2);
     roof.material = roofMat;
+    
+    // Add building and roof to shadow generator
+    this.shadowGenerator.addShadowCaster(building);
+    this.shadowGenerator.addShadowCaster(roof);
+    building.receiveShadows = true;
+    roof.receiveShadows = true;
   }
   
   private createFountain(position: Vector3): void {
@@ -190,6 +216,10 @@ export class TownScene extends Scene {
     waterMat.diffuseColor = new Color3(0.3, 0.5, 0.8);
     waterMat.alpha = 0.7;
     water.material = waterMat;
+    
+    // Add shadows
+    this.shadowGenerator.addShadowCaster(base);
+    base.receiveShadows = true;
   }
   
   private createTree(position: Vector3): void {
@@ -217,6 +247,12 @@ export class TownScene extends Scene {
     const leavesMat = new StandardMaterial('leavesMat', this);
     leavesMat.diffuseColor = new Color3(0.2, 0.6, 0.2);
     leaves.material = leavesMat;
+    
+    // Add shadows for trees
+    this.shadowGenerator.addShadowCaster(trunk);
+    this.shadowGenerator.addShadowCaster(leaves);
+    trunk.receiveShadows = true;
+    leaves.receiveShadows = true;
   }
   
   private createPlayer(): void {
@@ -228,6 +264,16 @@ export class TownScene extends Scene {
     });
     
     this.player.mesh.position = new Vector3(0, 1, -5);
+    
+    // Enable shadows for player sprite
+    this.player.enableShadows(this.shadowGenerator);
+    
+    // DEBUG: Add some emissive to see if sprite is visible
+    const mat = this.player.mesh.material as StandardMaterial;
+    if (mat) {
+      mat.emissiveColor = new Color3(0.2, 0.2, 0.2);
+      mat.specularColor = new Color3(0.1, 0.1, 0.1);
+    }
     
     // Make camera follow player
     this.registerBeforeRender(() => {

@@ -5,6 +5,12 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
+import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
+import { PointLight } from '@babylonjs/core/Lights/pointLight';
+import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
+import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
+import '@babylonjs/core/Materials/materialHelper';
+import '@babylonjs/core/Lights/Shadows/cascadedShadowGenerator';
 import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder';
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
@@ -220,9 +226,45 @@ export class MinimalGame {
     pipeline.imageProcessing.vignetteWeight = 2;
     pipeline.imageProcessing.vignetteFOV = 0.5;
     
-    // Light
-    const light = new HemisphericLight('gameLight', new Vector3(0, 1, 0), scene);
-    light.intensity = 0.8;
+    // Ambient light - increased for better sprite visibility
+    const ambient = new HemisphericLight('ambientLight', new Vector3(0, 1, 0), scene);
+    ambient.intensity = 0.8;
+    ambient.diffuse = new Color3(1, 1, 1);
+    ambient.groundColor = new Color3(0.5, 0.5, 0.6);
+    
+    // Directional light for shadows - pointing more downward from the left
+    const sun = new DirectionalLight('sunLight', new Vector3(0.5, -1, 0.5), scene);
+    sun.intensity = 1.2;
+    sun.diffuse = new Color3(1, 0.95, 0.8);
+    sun.specular = new Color3(0, 0, 0);
+    
+    // Set position for shadow frustum - must be high enough to encompass the scene
+    sun.position = new Vector3(-10, 30, -10);
+    sun.shadowMinZ = 1;
+    sun.shadowMaxZ = 50;
+    
+    // Alternative: Use PointLight for light from specific world position
+    // Uncomment below to use point light instead:
+    /*
+    const sun = new PointLight('sunLight', new Vector3(-15, 25, -15), scene);
+    sun.intensity = 2;
+    sun.diffuse = new Color3(1, 0.95, 0.8);
+    */
+    
+    // Shadow generator - use better quality settings
+    const shadowGenerator = new ShadowGenerator(2048, sun);
+    shadowGenerator.setDarkness(0.3);
+    
+    // Use PCF for better quality shadows
+    shadowGenerator.usePercentageCloserFiltering = true;
+    shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_HIGH;
+    
+    // Adjust shadow map settings for better results
+    shadowGenerator.bias = 0.005;
+    shadowGenerator.normalBias = 0.02;
+    
+    // Enable shadows in scene
+    scene.shadowsEnabled = true;
     
     // Ground with subdivisions for better lighting
     const ground = CreateGround('ground', { width: 40, height: 40, subdivisions: 4 }, scene);
@@ -233,6 +275,7 @@ export class MinimalGame {
     groundMat.diffuseTexture = grassTexture;
     groundMat.specularColor = new Color3(0, 0, 0);
     ground.material = groundMat;
+    ground.receiveShadows = true;
     
     // Town square cobblestone center
     const townSquare = CreateGround('townSquare', { width: 15, height: 15, subdivisions: 2 }, scene);
@@ -240,6 +283,7 @@ export class MinimalGame {
     const squareMat = new StandardMaterial('squareMat', scene);
     squareMat.diffuseColor = new Color3(0.5, 0.5, 0.5);
     townSquare.material = squareMat;
+    townSquare.receiveShadows = true;
     
     // Player animated sprite
     // Scale up for better visibility
@@ -256,7 +300,22 @@ export class MinimalGame {
     // So the collision width should be (22/96) * spriteWidth
     const playerCollisionWidth = (22 / 96) * spriteWidth; // ~0.917 units
     const characterBottomOffset = 0.8; // Adjusted for larger sprite size
+    
+    // Disable shadows on player sprite for now
+    // playerSprite.enableShadows(shadowGenerator);
     playerSprite.setPosition(new Vector3(0, characterBottomOffset, -5));
+    
+    // Debug: Test shadow with simple cube
+    const testCube = CreateBox('testCube', { size: 2 }, scene);
+    testCube.position = new Vector3(3, 1, -3);
+    const testMat = new StandardMaterial('testMat', scene);
+    testMat.diffuseColor = new Color3(1, 0, 0);
+    testCube.material = testMat;
+    shadowGenerator.addShadowCaster(testCube);
+    testCube.receiveShadows = true;
+    
+    // Shadow setup will be done after all objects are created
+    
     const player = playerSprite.mesh; // Reference for movement
     
     console.log('Player sprite created:', {
@@ -306,15 +365,19 @@ export class MinimalGame {
     // Remove automatic rendering group for player
     player.renderingGroupId = 0; // Same group as everything else for proper depth sorting
     
+    // Force shadow generator to include ground and other receivers
+    shadowGenerator.forceBackFacesOnly = false;
+    shadowGenerator.transparencyShadow = true;
+    
     // Town buildings with more detail - positioned further back
-    this.createBuildingWithRoof(scene, 'smithy', new Vector3(-10, 0, 10), 4, 5, 4, new Color3(0.5, 0.4, 0.3));
-    this.createBuildingWithRoof(scene, 'shop', new Vector3(10, 0, 10), 5, 4, 4, new Color3(0.6, 0.5, 0.4));
-    this.createBuildingWithRoof(scene, 'inn', new Vector3(0, 0, 15), 6, 6, 5, new Color3(0.7, 0.6, 0.5));
-    this.createBuildingWithRoof(scene, 'house1', new Vector3(-8, 0, -5), 3, 4, 3, new Color3(0.6, 0.5, 0.4));
-    this.createBuildingWithRoof(scene, 'house2', new Vector3(8, 0, -5), 3, 4, 3, new Color3(0.5, 0.5, 0.4));
+    this.createBuildingWithRoof(scene, 'smithy', new Vector3(-10, 0, 10), 4, 5, 4, new Color3(0.5, 0.4, 0.3), shadowGenerator);
+    this.createBuildingWithRoof(scene, 'shop', new Vector3(10, 0, 10), 5, 4, 4, new Color3(0.6, 0.5, 0.4), shadowGenerator);
+    this.createBuildingWithRoof(scene, 'inn', new Vector3(0, 0, 15), 6, 6, 5, new Color3(0.7, 0.6, 0.5), shadowGenerator);
+    this.createBuildingWithRoof(scene, 'house1', new Vector3(-8, 0, -5), 3, 4, 3, new Color3(0.6, 0.5, 0.4), shadowGenerator);
+    this.createBuildingWithRoof(scene, 'house2', new Vector3(8, 0, -5), 3, 4, 3, new Color3(0.5, 0.5, 0.4), shadowGenerator);
     
     // Add fountain in town center
-    this.createFountain(scene, new Vector3(0, 0, 0));
+    this.createFountain(scene, new Vector3(0, 0, 0), shadowGenerator);
     
     // Add trees around the town
     const treePositions = [
@@ -323,14 +386,17 @@ export class MinimalGame {
       new Vector3(-10, 0, 15), new Vector3(10, 0, 15),
       new Vector3(-18, 0, 0), new Vector3(18, 0, 0)
     ];
-    treePositions.forEach((pos, i) => this.createTree(scene, `tree${i}`, pos));
+    treePositions.forEach((pos, i) => this.createTree(scene, `tree${i}`, pos, shadowGenerator));
     
     // Add lamp posts
-    this.createLampPost(scene, 'lamp1', new Vector3(-5, 0, 0));
-    this.createLampPost(scene, 'lamp2', new Vector3(5, 0, 0));
+    this.createLampPost(scene, 'lamp1', new Vector3(-5, 0, 0), shadowGenerator);
+    this.createLampPost(scene, 'lamp2', new Vector3(5, 0, 0), shadowGenerator);
     
     // Add NPCs near buildings
-    this.createNPCs(scene);
+    this.createNPCs(scene, shadowGenerator);
+    
+    // Move shadow setup to after all objects are created
+    this.setupShadows(scene, shadowGenerator);
     
     // GUI overlay
     scene.executeWhenReady(() => {
@@ -504,7 +570,7 @@ export class MinimalGame {
     console.log('Game scene created');
   }
   
-  private createBuildingWithRoof(scene: Scene, name: string, position: Vector3, width: number, height: number, depth: number, color: Color3): void {
+  private createBuildingWithRoof(scene: Scene, name: string, position: Vector3, width: number, height: number, depth: number, color: Color3, shadowGenerator?: ShadowGenerator): void {
     // Building base
     const building = CreateBox(name, { width, height, depth }, scene);
     building.position = position;
@@ -535,6 +601,14 @@ export class MinimalGame {
     
     // Set roof alpha index
     roof.alphaIndex = -position.z * 100 + 1; // Slightly in front of building
+    
+    // Add shadows
+    if (shadowGenerator) {
+      shadowGenerator.addShadowCaster(building);
+      shadowGenerator.addShadowCaster(roof);
+    }
+    building.receiveShadows = true;
+    roof.receiveShadows = true;
     
     // Add collision box for this building (no extra padding needed now)
     this.collisionBoxes.push({
@@ -567,7 +641,7 @@ export class MinimalGame {
     debugBox.material = debugMat;
   }
   
-  private createFountain(scene: Scene, position: Vector3): void {
+  private createFountain(scene: Scene, position: Vector3, shadowGenerator?: ShadowGenerator): void {
     // Fountain base
     const base = CreateCylinder('fountainBase', {
       diameter: 4,
@@ -606,6 +680,16 @@ export class MinimalGame {
     pillar.position.y = 1;
     pillar.material = baseMat;
     
+    // Add shadows
+    if (shadowGenerator) {
+      shadowGenerator.addShadowCaster(base);
+      shadowGenerator.addShadowCaster(pillar);
+      // Water doesn't cast shadows due to transparency
+    }
+    base.receiveShadows = true;
+    water.receiveShadows = true;
+    pillar.receiveShadows = true;
+    
     // Add collision box for fountain
     // For a circular fountain with diameter 4, use a box inscribed in the circle
     const fountainRadius = 2; // diameter is 4
@@ -638,7 +722,7 @@ export class MinimalGame {
     debugBox.material = debugMat;
   }
   
-  private createTree(scene: Scene, name: string, position: Vector3): void {
+  private createTree(scene: Scene, name: string, position: Vector3, shadowGenerator?: ShadowGenerator): void {
     // Trunk
     const trunk = CreateCylinder(`${name}Trunk`, {
       diameter: 0.8,
@@ -665,9 +749,17 @@ export class MinimalGame {
     leavesMat.diffuseColor = new Color3(0.2, 0.6, 0.2);
     leaves.material = leavesMat;
     leaves.alphaIndex = -position.z * 100 + 1;
+    
+    // Add shadows
+    if (shadowGenerator) {
+      shadowGenerator.addShadowCaster(trunk);
+      shadowGenerator.addShadowCaster(leaves);
+    }
+    trunk.receiveShadows = true;
+    leaves.receiveShadows = true;
   }
   
-  private createNPCs(scene: Scene): void {
+  private createNPCs(scene: Scene, shadowGenerator: ShadowGenerator): void {
     // NPC positions and types
     const npcs: Array<{position: Vector3, type: NPCType, name: string}> = [
       { position: new Vector3(-8, 0, 7), type: 'blacksmith', name: 'blacksmith_npc' },   // Near smithy
@@ -694,31 +786,29 @@ export class MinimalGame {
         npc.faceLeft(); // This is the default, but being explicit
       }
       
+      // Disable shadows on NPC sprites for now
+      // npc.enableShadows(shadowGenerator);
+      
       // Set depth sorting
       npc.setAlphaIndex(-position.z * 100);
       
-      // Add idle animation or bobbing effect
-      const startY = position.y + 0.9; // Center of sprite
-      scene.registerBeforeRender(() => {
-        const time = Date.now() * 0.001;
-        npc.mesh.position.y = startY + Math.sin(time * 2) * 0.02; // Gentle bobbing
-      });
+      // Keep NPCs at fixed position without bobbing
     });
   }
   
-  private createLampPost(scene: Scene, name: string, position: Vector3): void {
+  private createLampPost(scene: Scene, name: string, position: Vector3, shadowGenerator?: ShadowGenerator): void {
     // Post
     const post = CreateCylinder(`${name}Post`, {
       diameter: 0.2,
       height: 3,
       tessellation: 6
     }, scene);
-    post.position = position;
-    post.position.y = 1.5;
+    post.position = position.clone();
+    post.position.y = 1.5; // Half the height so bottom touches ground
     
     const postMat = new StandardMaterial(`${name}PostMat`, scene);
     postMat.diffuseColor = new Color3(0.2, 0.2, 0.2);
-    postMat.metallic = 0.8;
+    postMat.specularColor = new Color3(0.3, 0.3, 0.3);
     post.material = postMat;
     
     // Lamp
@@ -726,13 +816,28 @@ export class MinimalGame {
       diameter: 0.6,
       segments: 8
     }, scene);
-    lamp.position = position;
-    lamp.position.y = 3;
+    lamp.position = position.clone();
+    lamp.position.y = 3.2; // Top of post (1.5 + 1.5) + a bit for the lamp
     
     const lampMat = new StandardMaterial(`${name}LampMat`, scene);
-    lampMat.emissiveColor = new Color3(1, 0.9, 0.6);
-    lampMat.diffuseColor = new Color3(1, 0.9, 0.6);
+    lampMat.emissiveColor = new Color3(1, 0.6, 0.2); // Match the warm orange light color
+    lampMat.diffuseColor = new Color3(1, 0.6, 0.2);
     lamp.material = lampMat;
+    
+    // Add a point light for the lamp glow - positioned at the lamp bulb
+    const lampLight = new PointLight(`${name}Light`, new Vector3(position.x, lamp.position.y, position.z), scene);
+    lampLight.diffuse = new Color3(1, 0.6, 0.2); // Warmer orange color
+    lampLight.specular = new Color3(1, 0.5, 0.1);
+    lampLight.intensity = 0.7; // Slightly higher intensity
+    lampLight.range = 10; // Slightly larger light radius
+    
+    // Add shadows
+    if (shadowGenerator) {
+      shadowGenerator.addShadowCaster(post);
+      shadowGenerator.addShadowCaster(lamp);
+    }
+    post.receiveShadows = true;
+    lamp.receiveShadows = true;
   }
   
   private createStatsPanel(gui: AdvancedDynamicTexture): void {
@@ -1101,5 +1206,47 @@ export class MinimalGame {
     texture.vScale = 10;
     
     return texture;
+  }
+  
+  private setupShadows(scene: Scene, shadowGenerator: ShadowGenerator): void {
+    // This is called after all objects are created to ensure comprehensive shadow coverage
+    scene.executeWhenReady(() => {
+      const shadowMap = shadowGenerator.getShadowMap();
+      if (shadowMap) {
+        shadowMap.refreshRate = 0; // RENDER_ALWAYS
+      }
+      
+      // Automatically add all opaque meshes to cast shadows
+      scene.meshes.forEach(mesh => {
+        // Skip sprites, debug meshes, and transparent objects
+        if (mesh.name.includes('sprite') || 
+            mesh.name.includes('Debug') || 
+            mesh.name.includes('water') ||
+            mesh.name === 'ground' || // Ground doesn't cast shadows
+            mesh.name === 'townSquare' || // Town square doesn't cast shadows
+            (mesh.material && 'alpha' in mesh.material && mesh.material.alpha < 1)) {
+          return;
+        }
+        
+        // Add to shadow casters if not already added
+        if (!shadowGenerator.getShadowMap()?.renderList?.includes(mesh)) {
+          shadowGenerator.addShadowCaster(mesh);
+        }
+        
+        // All meshes should receive shadows
+        mesh.receiveShadows = true;
+      });
+      
+      // Log shadow info after a short delay to ensure everything is loaded
+      setTimeout(() => {
+        console.log('Shadow generator info:', {
+          shadowMapSize: shadowGenerator.getShadowMap()?.getSize(),
+          renderListCount: shadowGenerator.getShadowMap()?.renderList?.length,
+          renderList: shadowGenerator.getShadowMap()?.renderList?.map(m => m.name),
+          isReady: shadowGenerator.getShadowMap()?.isReady(),
+          shadowsEnabled: scene.shadowsEnabled
+        });
+      }, 1000);
+    });
   }
 }

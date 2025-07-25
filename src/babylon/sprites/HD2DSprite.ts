@@ -34,7 +34,8 @@ export class HD2DSprite {
     // Create material
     this.material = new StandardMaterial(`${name}_mat`, scene);
     this.material.specularColor = new Color3(0, 0, 0);
-    this.material.emissiveColor = new Color3(1, 1, 1);
+    // Partial emissive to maintain sprite visibility while allowing shadows
+    this.material.emissiveColor = new Color3(0.7, 0.7, 0.7);
     
     // Set texture if provided
     this._texture = options.texture;
@@ -42,10 +43,15 @@ export class HD2DSprite {
       this.material.diffuseTexture = this._texture;
       this.material.diffuseTexture.hasAlpha = true;
       this.material.useAlphaFromDiffuseTexture = true;
+      // Ensure texture appears correctly when lit
+      this.material.diffuseColor = new Color3(1, 1, 1);
     } else {
       // Placeholder color
       this.material.diffuseColor = new Color3(1, 0.5, 0);
     }
+    
+    // Enable backface culling for proper shadow casting
+    this.material.backFaceCulling = false;
     
     this.mesh.material = this.material;
     
@@ -67,11 +73,20 @@ export class HD2DSprite {
       this.material.diffuseTexture.hasAlpha = true;
       this.material.useAlphaFromDiffuseTexture = true;
       this.material.diffuseColor = new Color3(1, 1, 1);
+      // Ensure emissive is off to allow lighting
+      this.material.emissiveColor = new Color3(0, 0, 0);
     }
   }
   
   setSize(width: number, height: number): void {
     this.mesh.scaling = new Vector3(width, height, 1);
+  }
+  
+  enableShadows(shadowGenerator: any): void {
+    // Add this mesh to the shadow generator to cast shadows
+    shadowGenerator.addShadowCaster(this.mesh);
+    // Enable receiving shadows on the sprite
+    this.mesh.receiveShadows = true;
   }
   
   dispose(): void {

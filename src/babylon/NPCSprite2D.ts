@@ -2,6 +2,7 @@
 import { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder';
+import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
@@ -28,6 +29,7 @@ export class NPCSprite2D {
   public mesh: Mesh;
   private material: StandardMaterial;
   private texture: Texture;
+  private shadowProxy: Mesh | null = null;
   
   constructor(
     public name: string,
@@ -54,8 +56,11 @@ export class NPCSprite2D {
     // Create material
     this.material = new StandardMaterial(`${name}_mat`, scene);
     this.material.specularColor = new Color3(0, 0, 0);
-    this.material.emissiveColor = new Color3(1, 1, 1);
+    // Partial emissive to maintain sprite visibility while allowing some lighting
+    this.material.emissiveColor = new Color3(0.7, 0.7, 0.7);
+    this.material.diffuseColor = new Color3(1, 1, 1);
     this.material.useAlphaFromDiffuseTexture = true;
+    this.material.backFaceCulling = false;
     
     // Load NPC texture
     const spritePath = `/assets/sprites/npc/${NPC_SPRITES[npcType]}`;
@@ -95,9 +100,38 @@ export class NPCSprite2D {
     this.mesh.alphaIndex = index;
   }
   
+  enableShadows(shadowGenerator: any): void {
+    // Create a shadow proxy - an invisible box that casts the shadow
+    if (!this.shadowProxy) {
+      this.shadowProxy = CreateBox(`${this.name}_shadowProxy`, {
+        width: 0.6,
+        height: 1.8,
+        depth: 0.3
+      }, this.scene);
+      
+      // Make the proxy invisible but still cast shadows
+      this.shadowProxy.isVisible = false;
+      this.shadowProxy.position = this.mesh.position.clone();
+      this.shadowProxy.position.y -= 0.1; // Slightly adjust for NPC height
+      
+      // Parent the shadow proxy to the sprite so it follows
+      this.shadowProxy.parent = this.mesh;
+    }
+    
+    // Add the shadow proxy to the shadow generator
+    shadowGenerator.addShadowCaster(this.shadowProxy);
+    
+    // The sprite itself should not cast shadows (it's a billboard)
+    // But it can receive shadows
+    this.mesh.receiveShadows = true;
+  }
+  
   dispose(): void {
     this.texture.dispose();
     this.material.dispose();
     this.mesh.dispose();
+    if (this.shadowProxy) {
+      this.shadowProxy.dispose();
+    }
   }
 }
