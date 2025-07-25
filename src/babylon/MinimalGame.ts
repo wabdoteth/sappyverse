@@ -10,6 +10,8 @@ import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder'
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 
 // Post-processing
 import { DefaultRenderingPipeline } from '@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline';
@@ -27,11 +29,13 @@ import { Image } from '@babylonjs/gui/2D/controls/image';
 
 // Game imports
 import { AnimatedSprite2D } from './AnimatedSprite2D';
+import { NPCSprite2D, NPCType } from './NPCSprite2D';
 
 export class MinimalGame {
   private engine: Engine;
   private currentScene: Scene | null = null;
   private canvas: HTMLCanvasElement;
+  private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
   private playerStats = {
     hp: 100,
     maxHp: 100,
@@ -167,6 +171,9 @@ export class MinimalGame {
       this.currentScene.dispose();
     }
     
+    // Clear collision boxes for new scene
+    this.collisionBoxes = [];
+    
     // Create game scene
     const scene = new Scene(this.engine);
     scene.clearColor = new Color4(0.5, 0.7, 0.9, 1); // Sky blue
@@ -220,7 +227,10 @@ export class MinimalGame {
     // Ground with subdivisions for better lighting
     const ground = CreateGround('ground', { width: 40, height: 40, subdivisions: 4 }, scene);
     const groundMat = new StandardMaterial('groundMat', scene);
-    groundMat.diffuseColor = new Color3(0.3, 0.6, 0.3);
+    
+    // Create pixel art grass texture
+    const grassTexture = this.createPixelGrassTexture(scene);
+    groundMat.diffuseTexture = grassTexture;
     groundMat.specularColor = new Color3(0, 0, 0);
     ground.material = groundMat;
     
@@ -232,14 +242,66 @@ export class MinimalGame {
     townSquare.material = squareMat;
     
     // Player animated sprite
+    // Scale up for better visibility
+    const spriteWidth = 4;
+    const spriteHeight = 3.33; // Maintain aspect ratio (96:80 = 1.2:1)
     const playerSprite = new AnimatedSprite2D('player', scene, {
-      width: 2.4,  // Scale up for visibility (96px / 40 = 2.4)
-      height: 2,   // Scale up for visibility (80px / 40 = 2)
+      width: spriteWidth,
+      height: spriteHeight,
       frameWidth: 96,
       frameHeight: 80
     });
-    playerSprite.setPosition(new Vector3(0, 1, -5)); // Start behind buildings
+    
+    // The character is 22 pixels wide in a 96 pixel frame
+    // So the collision width should be (22/96) * spriteWidth
+    const playerCollisionWidth = (22 / 96) * spriteWidth; // ~0.917 units
+    const characterBottomOffset = 0.8; // Adjusted for larger sprite size
+    playerSprite.setPosition(new Vector3(0, characterBottomOffset, -5));
     const player = playerSprite.mesh; // Reference for movement
+    
+    console.log('Player sprite created:', {
+      width: 2,
+      height: 2.5,
+      position: player.position,
+      boundingBox: player.getBoundingInfo().boundingBox
+    });
+    
+    // Visual debug: show player collision as a line at ground level
+    const playerDebug = CreateBox('playerDebug', {
+      width: playerCollisionWidth,
+      height: 0.1,
+      depth: 0.1
+    }, scene);
+    playerDebug.position = new Vector3(0, 0.05, -5); // Position at ground level
+    
+    const playerDebugMat = new StandardMaterial('playerDebugMat', scene);
+    playerDebugMat.diffuseColor = new Color3(0, 0, 1);
+    playerDebugMat.alpha = 0.5;
+    playerDebug.material = playerDebugMat;
+    
+    // Also create a debug box showing the sprite bounds
+    const spriteBounds = CreateBox('spriteBounds', {
+      width: spriteWidth,
+      height: spriteHeight,
+      depth: 0.1
+    }, scene);
+    spriteBounds.position = new Vector3(0, characterBottomOffset + spriteHeight/2, -5); // Center of sprite
+    
+    const spriteBoundsMat = new StandardMaterial('spriteBoundsMat', scene);
+    spriteBoundsMat.diffuseColor = new Color3(1, 1, 0);
+    spriteBoundsMat.alpha = 0.2;
+    spriteBoundsMat.wireframe = true;
+    spriteBounds.material = spriteBoundsMat;
+    
+    // Make debug objects follow player
+    scene.registerBeforeRender(() => {
+      playerDebug.position.x = player.position.x;
+      playerDebug.position.z = player.position.z;
+      
+      spriteBounds.position.x = player.position.x;
+      spriteBounds.position.y = player.position.y;
+      spriteBounds.position.z = player.position.z;
+    });
     
     // Remove automatic rendering group for player
     player.renderingGroupId = 0; // Same group as everything else for proper depth sorting
@@ -266,6 +328,9 @@ export class MinimalGame {
     // Add lamp posts
     this.createLampPost(scene, 'lamp1', new Vector3(-5, 0, 0));
     this.createLampPost(scene, 'lamp2', new Vector3(5, 0, 0));
+    
+    // Add NPCs near buildings
+    this.createNPCs(scene);
     
     // GUI overlay
     scene.executeWhenReady(() => {
@@ -331,38 +396,100 @@ export class MinimalGame {
       inputMap[e.key.toLowerCase()] = false;
     });
     
+    // Pass collision boxes to movement logic
+    const collisionBoxes = this.collisionBoxes;
+    
     // Movement logic
     scene.registerBeforeRender(() => {
-      const speed = 0.1;
+      const speed = 0.05; // Slower movement speed
       let isMoving = false;
       let direction: 'up' | 'down' | 'left' | 'right' | undefined;
       
+      // Calculate intended movement
+      let moveX = 0;
+      let moveZ = 0;
+      
       if (inputMap['w']) {
-        player.position.z += speed;
+        moveZ = speed;  // W moves forward (+Z in Babylon)
         isMoving = true;
         direction = 'up';
       }
       if (inputMap['s']) {
-        player.position.z -= speed;
+        moveZ = -speed; // S moves backward (-Z in Babylon)
         isMoving = true;
         direction = 'down';
       }
       if (inputMap['a']) {
-        player.position.x -= speed;
+        moveX = -speed;
         isMoving = true;
         direction = 'left';
       }
       if (inputMap['d']) {
-        player.position.x += speed;
+        moveX = speed;
         isMoving = true;
         direction = 'right';
+      }
+      
+      // Test new position before moving
+      const newX = player.position.x + moveX;
+      const newZ = player.position.z + moveZ;
+      
+      // Check collisions - test X and Z movement separately
+      // Use actual character width for collision
+      const halfWidth = playerCollisionWidth / 2;
+      let canMoveX = true;
+      let canMoveZ = true;
+      
+      // Check X movement
+      if (moveX !== 0) {
+        const testX = player.position.x + moveX;
+        for (let i = 0; i < collisionBoxes.length; i++) {
+          const box = collisionBoxes[i];
+          // No padding on X checks - collision should happen exactly when blue line touches
+          if (testX + halfWidth > box.min.x && 
+              testX - halfWidth < box.max.x &&
+              player.position.z > box.min.z && 
+              player.position.z < box.max.z) {
+            canMoveX = false;
+            const boxName = i < 5 ? `Building${i}` : 'Fountain';
+            console.log(`X collision with ${boxName}`);
+            break;
+          }
+        }
+      }
+      
+      // Check Z movement
+      if (moveZ !== 0) {
+        const testZ = player.position.z + moveZ;
+        for (let i = 0; i < collisionBoxes.length; i++) {
+          const box = collisionBoxes[i];
+          // No padding needed since Z works fine
+          if (player.position.x + halfWidth > box.min.x && 
+              player.position.x - halfWidth < box.max.x &&
+              testZ > box.min.z && 
+              testZ < box.max.z) {
+            canMoveZ = false;
+            const boxName = i < 5 ? `Building${i}` : 'Fountain';
+            console.log(`Z collision with ${boxName}`);
+            console.log(`Player Z: ${player.position.z.toFixed(2)}, TestZ: ${testZ.toFixed(2)}, Box Z: ${box.min.z.toFixed(2)} to ${box.max.z.toFixed(2)}`);
+            break;
+          }
+        }
+      }
+      
+      // Apply movement only if no collision
+      if (canMoveX) {
+        player.position.x = newX;
+      }
+      if (canMoveZ) {
+        player.position.z = newZ;
       }
       
       // Update player animation state
       playerSprite.setMoving(isMoving, direction);
       
       // Keep player at correct height
-      player.position.y = 1;
+      player.position.y = characterBottomOffset;
       
       // Update sprite depth based on Z position (objects further back render first)
       // In Babylon.js, we'll use alphaIndex for proper sprite sorting
@@ -388,6 +515,9 @@ export class MinimalGame {
     mat.specularColor = new Color3(0.1, 0.1, 0.1);
     building.material = mat;
     
+    // Set alpha index for depth sorting based on Z position
+    building.alphaIndex = -position.z * 100;
+    
     // Roof
     const roof = CreateCylinder(`${name}Roof`, {
       diameterTop: 0,
@@ -402,6 +532,39 @@ export class MinimalGame {
     const roofMat = new StandardMaterial(`${name}RoofMat`, scene);
     roofMat.diffuseColor = new Color3(0.8, 0.3, 0.2);
     roof.material = roofMat;
+    
+    // Set roof alpha index
+    roof.alphaIndex = -position.z * 100 + 1; // Slightly in front of building
+    
+    // Add collision box for this building (no extra padding needed now)
+    this.collisionBoxes.push({
+      min: new Vector3(
+        position.x - width/2,
+        0,
+        position.z - depth/2
+      ),
+      max: new Vector3(
+        position.x + width/2,
+        height,
+        position.z + depth/2
+      )
+    });
+    
+    console.log(`Building ${name} collision box: (${position.x - width/2}, ${position.z - depth/2}) to (${position.x + width/2}, ${position.z + depth/2})`);
+    
+    // Visual debug: show collision box
+    const debugBox = CreateBox(`${name}Debug`, {
+      width: width,
+      height: 0.1,
+      depth: depth
+    }, scene);
+    debugBox.position = position.clone();
+    debugBox.position.y = 0.05;
+    
+    const debugMat = new StandardMaterial(`${name}DebugMat`, scene);
+    debugMat.diffuseColor = new Color3(1, 0, 0);
+    debugMat.alpha = 0.3;
+    debugBox.material = debugMat;
   }
   
   private createFountain(scene: Scene, position: Vector3): void {
@@ -442,6 +605,37 @@ export class MinimalGame {
     pillar.position = position;
     pillar.position.y = 1;
     pillar.material = baseMat;
+    
+    // Add collision box for fountain
+    // For a circular fountain with diameter 4, use a box inscribed in the circle
+    const fountainRadius = 2; // diameter is 4
+    const boxSize = fountainRadius * 2 * 0.707; // Box inscribed in circle: side = diameter * sin(45°)
+    this.collisionBoxes.push({
+      min: new Vector3(
+        position.x - boxSize/2,
+        0,
+        position.z - boxSize/2
+      ),
+      max: new Vector3(
+        position.x + boxSize/2,
+        2,
+        position.z + boxSize/2
+      )
+    });
+    
+    // Visual debug: show collision box
+    const debugBox = CreateBox('fountainDebug', {
+      width: boxSize,
+      height: 0.1,
+      depth: boxSize
+    }, scene);
+    debugBox.position = position.clone();
+    debugBox.position.y = 0.05;
+    
+    const debugMat = new StandardMaterial('fountainDebugMat', scene);
+    debugMat.diffuseColor = new Color3(0, 1, 0);
+    debugMat.alpha = 0.3;
+    debugBox.material = debugMat;
   }
   
   private createTree(scene: Scene, name: string, position: Vector3): void {
@@ -457,6 +651,7 @@ export class MinimalGame {
     const trunkMat = new StandardMaterial(`${name}TrunkMat`, scene);
     trunkMat.diffuseColor = new Color3(0.4, 0.3, 0.2);
     trunk.material = trunkMat;
+    trunk.alphaIndex = -position.z * 100;
     
     // Leaves
     const leaves = CreateSphere(`${name}Leaves`, {
@@ -469,6 +664,46 @@ export class MinimalGame {
     const leavesMat = new StandardMaterial(`${name}LeavesMat`, scene);
     leavesMat.diffuseColor = new Color3(0.2, 0.6, 0.2);
     leaves.material = leavesMat;
+    leaves.alphaIndex = -position.z * 100 + 1;
+  }
+  
+  private createNPCs(scene: Scene): void {
+    // NPC positions and types
+    const npcs: Array<{position: Vector3, type: NPCType, name: string}> = [
+      { position: new Vector3(-8, 0, 7), type: 'blacksmith', name: 'blacksmith_npc' },   // Near smithy
+      { position: new Vector3(8, 0, 7), type: 'merchant', name: 'merchant_npc' },        // Near shop
+      { position: new Vector3(3, 0, 12), type: 'innkeeper', name: 'innkeeper_npc' },     // Near inn
+      { position: new Vector3(-5, 0, -3), type: 'scholar', name: 'scholar_npc' },        // Near house1
+      { position: new Vector3(5, 0, -3), type: 'guard', name: 'guard_npc' }              // Near house2
+    ];
+    
+    npcs.forEach(({ position, type, name }) => {
+      const npc = new NPCSprite2D(name, type, scene, {
+        width: 1.2,   // Slightly smaller than player
+        height: 1.8   // Proper human proportions
+      });
+      
+      // Position NPC at ground level
+      npc.setPosition(position);
+      
+      // Make NPCs face toward the center (x=0)
+      // NPCs on the left (negative X) face right, NPCs on the right face left
+      if (position.x < 0) {
+        npc.faceRight();
+      } else {
+        npc.faceLeft(); // This is the default, but being explicit
+      }
+      
+      // Set depth sorting
+      npc.setAlphaIndex(-position.z * 100);
+      
+      // Add idle animation or bobbing effect
+      const startY = position.y + 0.9; // Center of sprite
+      scene.registerBeforeRender(() => {
+        const time = Date.now() * 0.001;
+        npc.mesh.position.y = startY + Math.sin(time * 2) * 0.02; // Gentle bobbing
+      });
+    });
   }
   
   private createLampPost(scene: Scene, name: string, position: Vector3): void {
@@ -801,5 +1036,70 @@ export class MinimalGame {
     setTimeout(() => {
       gui.removeControl(messageBox);
     }, 2000);
+  }
+  
+  private createPixelGrassTexture(scene: Scene): DynamicTexture {
+    const size = 128; // Texture size
+    const texture = new DynamicTexture('grassTexture', size, scene, false);
+    const ctx = texture.getContext();
+    
+    // Base grass color
+    ctx.fillStyle = '#4a7c4e';
+    ctx.fillRect(0, 0, size, size);
+    
+    // Add pixel art grass details
+    const grassColors = ['#5a8c5e', '#3a6c3e', '#6a9c6e', '#2a5c2e'];
+    const pixelSize = 4;
+    
+    // Random grass pixels
+    for (let i = 0; i < 200; i++) {
+      const x = Math.floor(Math.random() * (size / pixelSize)) * pixelSize;
+      const y = Math.floor(Math.random() * (size / pixelSize)) * pixelSize;
+      ctx.fillStyle = grassColors[Math.floor(Math.random() * grassColors.length)];
+      ctx.fillRect(x, y, pixelSize, pixelSize);
+    }
+    
+    // Add some darker grass blades
+    ctx.strokeStyle = '#2a4c2e';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 50; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - 2 + Math.random() * 4, y - 4 - Math.random() * 4);
+      ctx.stroke();
+    }
+    
+    // Add some highlights
+    ctx.strokeStyle = '#6aac6e';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 30; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - 1 + Math.random() * 2, y - 3 - Math.random() * 3);
+      ctx.stroke();
+    }
+    
+    // Add tiny flowers/details
+    const flowerColors = ['#ffeb3b', '#ff5722', '#e91e63', '#9c27b0'];
+    for (let i = 0; i < 15; i++) {
+      const x = Math.floor(Math.random() * (size / pixelSize)) * pixelSize;
+      const y = Math.floor(Math.random() * (size / pixelSize)) * pixelSize;
+      ctx.fillStyle = flowerColors[Math.floor(Math.random() * flowerColors.length)];
+      ctx.fillRect(x, y, pixelSize, pixelSize);
+    }
+    
+    texture.update();
+    
+    // Set texture properties for pixel art look
+    texture.wrapU = Texture.WRAP_ADDRESSMODE;
+    texture.wrapV = Texture.WRAP_ADDRESSMODE;
+    texture.uScale = 10; // Tile the texture
+    texture.vScale = 10;
+    
+    return texture;
   }
 }

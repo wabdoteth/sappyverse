@@ -6,6 +6,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Matrix } from '@babylonjs/core/Maths/math.vector';
 
 export interface AnimationConfig {
   key: string;
@@ -54,6 +55,8 @@ export class AnimatedSprite2D {
       sideOrientation: Mesh.DOUBLESIDE
     }, scene);
     
+    // Don't adjust pivot for now - let's debug the issue first
+    
     // Create material
     this.material = new StandardMaterial(`${name}_mat`, scene);
     this.material.specularColor = new Color3(0, 0, 0);
@@ -66,7 +69,7 @@ export class AnimatedSprite2D {
     this.mesh.billboardMode = billboardMode;
     
     // Ensure sprite renders in correct order
-    this.mesh.renderingGroupId = 1;
+    // this.mesh.renderingGroupId = 1; // Let the game handle depth sorting
     
     // Load animations
     this.loadPlayerAnimations();
