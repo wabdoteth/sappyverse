@@ -16,6 +16,15 @@ export default defineConfig({
     open: true
   },
   optimizeDeps: {
-    include: ['phaser']
+    include: [
+      '@babylonjs/core',
+      '@babylonjs/gui',
+      '@babylonjs/loaders',
+      '@babylonjs/materials',
+      '@babylonjs/core/Engines/engine',
+      '@babylonjs/core/scene',
+      '@babylonjs/gui/2D'
+    ],
+    exclude: ['@babylonjs/havok']
   }
 });

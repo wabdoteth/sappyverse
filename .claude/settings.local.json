@@ -7,7 +7,9 @@
       "Bash(npm run dev:*)",
       "Bash(npm run:*)",
       "Bash(node:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(rm:*)",
+      "WebFetch(domain:doc.babylonjs.com)"
     ],
     "deny": []
   }

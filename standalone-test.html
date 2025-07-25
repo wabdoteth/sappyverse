@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Babylon.js Standalone Test</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial; }
+        #renderCanvas { width: 100%; height: 100vh; display: block; }
+        #info { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.7); padding: 10px; }
+    </style>
+</head>
+<body>
+    <canvas id="renderCanvas"></canvas>
+    <div id="info">Loading...</div>
+    
+    <!-- Load Babylon.js from CDN -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+    
+    <script>
+        window.addEventListener('DOMContentLoaded', function() {
+            const info = document.getElementById('info');
+            info.innerHTML = 'Initializing...';
+            
+            const canvas = document.getElementById('renderCanvas');
+            const engine = new BABYLON.Engine(canvas, true);
+            
+            const createScene = function() {
+                const scene = new BABYLON.Scene(engine);
+                scene.clearColor = new BABYLON.Color3(0.2, 0.2, 0.3);
+                
+                // Camera
+                const camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(0, 0, -10), scene);
+                camera.setTarget(BABYLON.Vector3.Zero());
+                camera.attachControl(canvas, true);
+                
+                // Light
+                const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), scene);
+                
+                // Box
+                const box = BABYLON.MeshBuilder.CreateBox('box', {size: 2}, scene);
+                
+                // GUI
+                const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');
+                
+                const panel = new BABYLON.GUI.StackPanel();
+                panel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+                advancedTexture.addControl(panel);
+                
+                const header = new BABYLON.GUI.TextBlock();
+                header.text = 'Babylon.js GUI Test';
+                header.height = '30px';
+                header.color = 'white';
+                header.fontSize = 24;
+                header.marginBottom = '20px';
+                panel.addControl(header);
+                
+                const button = BABYLON.GUI.Button.CreateSimpleButton('button1', 'Click Me!');
+                button.width = '150px';
+                button.height = '40px';
+                button.color = 'white';
+                button.cornerRadius = 20;
+                button.background = 'green';
+                
+                let clickCount = 0;
+                button.onPointerUpObservable.add(function() {
+                    clickCount++;
+                    info.innerHTML = 'Button clicked ' + clickCount + ' times!';
+                    console.log('Button clicked!');
+                });
+                
+                button.onPointerEnterObservable.add(function() {
+                    button.background = 'lightgreen';
+                });
+                
+                button.onPointerOutObservable.add(function() {
+                    button.background = 'green';
+                });
+                
+                panel.addControl(button);
+                
+                info.innerHTML = 'Scene ready. Try clicking the green button.';
+                
+                return scene;
+            };
+            
+            const scene = createScene();
+            
+            engine.runRenderLoop(function() {
+                scene.render();
+            });
+            
+            window.addEventListener('resize', function() {
+                engine.resize();
+            });
+            
+            // Debug: log all clicks
+            canvas.addEventListener('click', function(e) {
+                console.log('Canvas clicked at:', e.clientX, e.clientY);
+            });
+        });
+    </script>
+</body>
+</html>

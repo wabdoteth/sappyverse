@@ -22,6 +22,11 @@
   },
   "homepage": "https://github.com/wabdoteth/sappyverse#readme",
   "dependencies": {
+    "@babylonjs/core": "^8.18.0",
+    "@babylonjs/gui": "^8.18.0",
+    "@babylonjs/loaders": "^8.18.0",
+    "@babylonjs/materials": "^8.18.0",
+    "@babylonjs/post-processes": "^8.18.0",
     "phaser": "^3.70.0"
   },
   "devDependencies": {
