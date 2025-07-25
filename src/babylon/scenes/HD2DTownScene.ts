@@ -1,0 +1,481 @@
+// HD-2D Town Scene Implementation
+import { Scene } from '@babylonjs/core/scene';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
+import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
+import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder';
+import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
+import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { PBRMaterial } from '@babylonjs/core/Materials/PBR/pbrMaterial';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
+import { PointLight } from '@babylonjs/core/Lights/pointLight';
+import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
+import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
+import { HD2DAnimatedSprite } from '../HD2DAnimatedSprite';
+import { HD2DSprite } from '../HD2DSprite';
+import { AnimatedWaterMaterial } from '../materials/AnimatedWaterMaterial';
+import { FountainWaterFlow } from '../effects/FountainWaterFlow';
+
+export class HD2DTownScene {
+    private scene: Scene;
+    private player: HD2DAnimatedSprite;
+    private npcs: HD2DSprite[] = [];
+    private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
+    private fountainWaterFlow: FountainWaterFlow;
+    
+    constructor(scene: Scene) {
+        this.scene = scene;
+    }
+    
+    public async build(): Promise<void> {
+        console.log('Building HD-2D Town Scene...');
+        
+        // Set scene ambiance
+        this.scene.clearColor = new Color4(0.5, 0.7, 0.9, 1); // Sky blue
+        
+        // Create environment
+        this.createGround();
+        this.createTownSquare();
+        this.createBuildings();
+        this.createTrees();
+        this.createFountain();
+        this.createLampPosts();
+        
+        // Create characters
+        await this.createPlayer();
+        await this.createNPCs();
+        
+        // Set up collision boxes
+        this.setupCollisions();
+        
+        // Create fountain water flow after sprites
+        this.fountainWaterFlow = new FountainWaterFlow(this.scene, new Vector3(0, 0, 0));
+        
+        console.log('HD-2D Town Scene built successfully!');
+    }
+    
+    private createGround(): void {
+        const ground = CreateGround('ground', {
+            width: 40,
+            height: 40,
+            subdivisions: 4
+        }, this.scene);
+        
+        // Create pixel art grass texture
+        const grassTexture = this.createPixelGrassTexture();
+        
+        const groundMat = new PBRMaterial('groundMat', this.scene);
+        groundMat.albedoTexture = grassTexture;
+        groundMat.roughness = 1.0;
+        groundMat.metallic = 0;
+        groundMat.specularIntensity = 0;
+        
+        ground.material = groundMat;
+        ground.receiveShadows = true;
+        ground.renderingGroupId = 0; // Ground layer
+    }
+    
+    private createTownSquare(): void {
+        const townSquare = CreateGround('townSquare', {
+            width: 15,
+            height: 15,
+            subdivisions: 2
+        }, this.scene);
+        
+        townSquare.position.y = 0.01;
+        
+        const squareMat = new PBRMaterial('squareMat', this.scene);
+        squareMat.albedoColor = new Color3(0.5, 0.5, 0.5);
+        squareMat.roughness = 0.8;
+        squareMat.metallic = 0;
+        
+        townSquare.material = squareMat;
+        townSquare.receiveShadows = true;
+        townSquare.renderingGroupId = 0;
+    }
+    
+    private createBuildings(): void {
+        // Building positions and sizes from original
+        const buildings = [
+            { name: 'smithy', pos: new Vector3(-10, 0, 10), size: { w: 4, h: 5, d: 4 }, color: new Color3(0.5, 0.4, 0.3) },
+            { name: 'shop', pos: new Vector3(10, 0, 10), size: { w: 5, h: 4, d: 4 }, color: new Color3(0.6, 0.5, 0.4) },
+            { name: 'inn', pos: new Vector3(0, 0, 15), size: { w: 6, h: 6, d: 5 }, color: new Color3(0.7, 0.6, 0.5) },
+            { name: 'house1', pos: new Vector3(-8, 0, -5), size: { w: 3, h: 4, d: 3 }, color: new Color3(0.6, 0.5, 0.4) },
+            { name: 'house2', pos: new Vector3(8, 0, -5), size: { w: 3, h: 4, d: 3 }, color: new Color3(0.5, 0.5, 0.4) }
+        ];
+        
+        buildings.forEach(buildingData => {
+            this.createBuildingWithRoof(buildingData);
+        });
+    }
+    
+    private createBuildingWithRoof(data: any): void {
+        // Building base
+        const building = CreateBox(data.name, {
+            width: data.size.w,
+            height: data.size.h,
+            depth: data.size.d
+        }, this.scene);
+        
+        building.position = data.pos.clone();
+        building.position.y = data.size.h / 2;
+        
+        const mat = new PBRMaterial(`${data.name}Mat`, this.scene);
+        mat.albedoColor = data.color;
+        mat.roughness = 0.9;
+        mat.metallic = 0;
+        
+        // HD-2D rim lighting effect
+        mat.emissiveColor = data.color.scale(0.1);
+        mat.emissiveFresnelParameters = {
+            bias: 0.6,
+            power: 4,
+            leftColor: Color3.Black(),
+            rightColor: data.color.scale(0.3)
+        };
+        mat.opacityFresnelParameters = {
+            bias: 0.5,
+            power: 4,
+            leftColor: Color3.White(),
+            rightColor: Color3.Black()
+        };
+        
+        building.material = mat;
+        building.receiveShadows = true;
+        building.renderingGroupId = 1; // Environment layer
+        
+        // Roof
+        const roof = CreateCylinder(`${data.name}Roof`, {
+            diameterTop: 0,
+            diameterBottom: Math.max(data.size.w, data.size.d) * 1.4,
+            height: 2.5,
+            tessellation: 4
+        }, this.scene);
+        
+        roof.position = data.pos.clone();
+        roof.position.y = data.size.h + 1.25;
+        roof.rotation.y = Math.PI / 4;
+        
+        const roofMat = new PBRMaterial(`${data.name}RoofMat`, this.scene);
+        roofMat.albedoColor = new Color3(0.8, 0.3, 0.2);
+        roofMat.roughness = 0.95;
+        roofMat.metallic = 0;
+        
+        roof.material = roofMat;
+        roof.receiveShadows = true;
+        roof.renderingGroupId = 1;
+        
+        // Add to collision boxes
+        this.collisionBoxes.push({
+            min: new Vector3(
+                data.pos.x - data.size.w/2,
+                0,
+                data.pos.z - data.size.d/2
+            ),
+            max: new Vector3(
+                data.pos.x + data.size.w/2,
+                data.size.h,
+                data.pos.z + data.size.d/2
+            )
+        });
+    }
+    
+    private createTrees(): void {
+        const treePositions = [
+            new Vector3(-15, 0, 10), new Vector3(15, 0, 10),
+            new Vector3(-15, 0, -10), new Vector3(15, 0, -10),
+            new Vector3(-10, 0, 15), new Vector3(10, 0, 15),
+            new Vector3(-18, 0, 0), new Vector3(18, 0, 0)
+        ];
+        
+        treePositions.forEach((pos, i) => {
+            // Trunk
+            const trunk = CreateCylinder(`tree${i}Trunk`, {
+                diameter: 0.8,
+                height: 3,
+                tessellation: 6
+            }, this.scene);
+            
+            trunk.position = pos.clone();
+            trunk.position.y = 1.5;
+            
+            const trunkMat = new PBRMaterial(`tree${i}TrunkMat`, this.scene);
+            trunkMat.albedoColor = new Color3(0.4, 0.3, 0.2);
+            trunkMat.roughness = 1.0;
+            trunkMat.metallic = 0;
+            
+            // Subtle rim light
+            trunkMat.emissiveFresnelParameters = {
+                bias: 0.8,
+                power: 3,
+                leftColor: Color3.Black(),
+                rightColor: new Color3(0.2, 0.15, 0.1)
+            };
+            
+            trunk.material = trunkMat;
+            trunk.receiveShadows = true;
+            trunk.renderingGroupId = 1;
+            
+            // Leaves
+            const leaves = CreateSphere(`tree${i}Leaves`, {
+                diameter: 3,
+                segments: 8
+            }, this.scene);
+            
+            leaves.position = pos.clone();
+            leaves.position.y = 3.5;
+            
+            const leavesMat = new PBRMaterial(`tree${i}LeavesMat`, this.scene);
+            leavesMat.albedoColor = new Color3(0.2, 0.6, 0.2);
+            leavesMat.roughness = 1.0;
+            leavesMat.metallic = 0;
+            
+            leaves.material = leavesMat;
+            leaves.receiveShadows = true;
+            leaves.renderingGroupId = 1;
+        });
+    }
+    
+    private createFountain(): void {
+        const fountainPos = new Vector3(0, 0, 0);
+        
+        // Base
+        const base = CreateCylinder('fountainBase', {
+            diameter: 4,
+            height: 0.5,
+            tessellation: 8
+        }, this.scene);
+        
+        base.position = fountainPos.clone();
+        base.position.y = 0.25;
+        
+        const baseMat = new PBRMaterial('fountainBaseMat', this.scene);
+        baseMat.albedoColor = new Color3(0.6, 0.6, 0.6);
+        baseMat.roughness = 0.7;
+        baseMat.metallic = 0;
+        
+        base.material = baseMat;
+        base.receiveShadows = true;
+        base.renderingGroupId = 1;
+        
+        // Water with animated shader
+        const water = CreateCylinder('water', {
+            diameter: 3.5,
+            height: 0.3,
+            tessellation: 32  // Higher tessellation for wave animation
+        }, this.scene);
+        
+        water.position = fountainPos.clone();
+        water.position.y = 0.5;
+        
+        // Use animated water material
+        const waterMat = new AnimatedWaterMaterial('fountainWater', this.scene);
+        waterMat.setWaterColors(
+            new Color3(0.4, 0.6, 0.9),  // Shallow color
+            new Color3(0.2, 0.3, 0.6)   // Deep color
+        );
+        waterMat.setTransparency(0.8);
+        waterMat.setReflectivity(0.4);
+        
+        water.material = waterMat;
+        water.receiveShadows = true;
+        water.renderingGroupId = 1;
+        
+        // Center pillar
+        const pillar = CreateCylinder('fountainPillar', {
+            diameter: 0.5,
+            height: 1.5,
+            tessellation: 6
+        }, this.scene);
+        
+        pillar.position = fountainPos.clone();
+        pillar.position.y = 1;
+        pillar.material = baseMat;
+        pillar.receiveShadows = true;
+        pillar.renderingGroupId = 1;
+        
+        // Add collision
+        const fountainRadius = 2;
+        const boxSize = fountainRadius * 2 * 0.707;
+        this.collisionBoxes.push({
+            min: new Vector3(-boxSize/2, 0, -boxSize/2),
+            max: new Vector3(boxSize/2, 2, boxSize/2)
+        });
+        
+        // Water flow will be added after sprites are created
+    }
+    
+    private createLampPosts(): void {
+        const positions = [
+            new Vector3(-5, 0, 0),
+            new Vector3(5, 0, 0)
+        ];
+        
+        const lights = this.scene.lights.filter(l => l instanceof DirectionalLight);
+        const shadowGen = lights.length > 0 && (lights[0] as any).shadowGenerator ? 
+            (lights[0] as any).shadowGenerator : null;
+        
+        positions.forEach((pos, i) => {
+            // Post
+            const post = CreateCylinder(`lamp${i}Post`, {
+                diameter: 0.2,
+                height: 3,
+                tessellation: 6
+            }, this.scene);
+            
+            post.position = pos.clone();
+            post.position.y = 1.5;
+            
+            const postMat = new PBRMaterial(`lamp${i}PostMat`, this.scene);
+            postMat.albedoColor = new Color3(0.2, 0.2, 0.2);
+            postMat.roughness = 0.3;
+            postMat.metallic = 0.7;
+            
+            post.material = postMat;
+            post.receiveShadows = true;
+            post.renderingGroupId = 1;
+            
+            if (shadowGen) {
+                shadowGen.addShadowCaster(post);
+            }
+            
+            // Lamp
+            const lamp = CreateSphere(`lamp${i}Lamp`, {
+                diameter: 0.6,
+                segments: 8
+            }, this.scene);
+            
+            lamp.position = pos.clone();
+            lamp.position.y = 3.2;
+            
+            const lampMat = new StandardMaterial(`lamp${i}LampMat`, this.scene);
+            lampMat.emissiveColor = new Color3(1, 0.6, 0.2);
+            lampMat.diffuseColor = new Color3(1, 0.6, 0.2);
+            
+            lamp.material = lampMat;
+            lamp.renderingGroupId = 1;
+            
+            // Point light
+            const lampLight = new PointLight(`lamp${i}Light`, 
+                new Vector3(pos.x, 3.2, pos.z), this.scene);
+            lampLight.diffuse = new Color3(1, 0.6, 0.2);
+            lampLight.specular = new Color3(1, 0.5, 0.1);
+            lampLight.intensity = 0.7;
+            lampLight.range = 10;
+        });
+    }
+    
+    private async createPlayer(): Promise<void> {
+        this.player = new HD2DAnimatedSprite('player', this.scene, {
+            width: 3,  // Proper scale
+            height: 3, // Proper scale
+            frameWidth: 96,
+            frameHeight: 80
+        });
+        
+        // Load player animations with default idle sprite
+        await this.player.loadSpriteSheet('/assets/sprites/player/IDLE/idle_down.png');
+        this.player.loadCharacterAnimations('/assets/sprites/player');
+        
+        // Start with idle animation
+        this.player.setMoving(false, 'down');
+        
+        // Set initial position
+        // Character is small within the frame, adjust Y to align with ground
+        // Since character occupies bottom ~40% of frame, position accordingly
+        this.player.setPosition(new Vector3(0, 0.6, -5)); // Lower to align feet with ground
+        
+        // Enable outline - disabled due to shader issues
+        // this.player.enableOutline(new Color3(0, 0, 0), 2);
+    }
+    
+    private async createNPCs(): Promise<void> {
+        const npcData = [
+            { name: 'blacksmith', sprite: 'OT2_202209_PUB01_DOT009.png', pos: new Vector3(-8, 0, 7) },
+            { name: 'merchant', sprite: 'OT2_202209_PUB01_DOT008.png', pos: new Vector3(8, 0, 7) },
+            { name: 'innkeeper', sprite: 'OT2_202209_PUB01_DOT010.png', pos: new Vector3(3, 0, 12) },
+            { name: 'scholar', sprite: 'OT2_202209_PUB01_DOT011.png', pos: new Vector3(-5, 0, -3) },
+            { name: 'guard', sprite: 'OT2_202209_PUB01_DOT012.png', pos: new Vector3(5, 0, -3) }
+        ];
+        
+        for (const data of npcData) {
+            const npc = new HD2DSprite(data.name, this.scene, {
+                width: 1.2,   // Original NPC size
+                height: 1.8,  // Original NPC size
+                frameWidth: 64,
+                frameHeight: 64
+            });
+            
+            await npc.loadSpriteSheet(`/assets/sprites/npc/${data.sprite}`);
+            npc.setPosition(new Vector3(data.pos.x, 0.9, data.pos.z)); // Half of 1.8 height
+            
+            // Face center
+            if (data.pos.x < 0) {
+                npc.mesh.scaling.x = -1; // Flip to face right
+            }
+            
+            // Enable outline - disabled due to shader issues
+            // npc.enableOutline(new Color3(0, 0, 0), 1);
+            
+            // Enable speech bubble for interaction
+            npc.enableSpeechBubble();
+            
+            this.npcs.push(npc);
+        }
+    }
+    
+    private createPixelGrassTexture(): Texture {
+        const size = 128;
+        const texture = new DynamicTexture('grassTexture', size, this.scene, false);
+        const ctx = texture.getContext();
+        
+        // Base grass color
+        ctx.fillStyle = '#4a7c4e';
+        ctx.fillRect(0, 0, size, size);
+        
+        // Add pixel details
+        const grassColors = ['#5a8c5e', '#3a6c3e', '#6a9c6e', '#2a5c2e'];
+        const pixelSize = 4;
+        
+        for (let i = 0; i < 200; i++) {
+            const x = Math.floor(Math.random() * (size / pixelSize)) * pixelSize;
+            const y = Math.floor(Math.random() * (size / pixelSize)) * pixelSize;
+            ctx.fillStyle = grassColors[Math.floor(Math.random() * grassColors.length)];
+            ctx.fillRect(x, y, pixelSize, pixelSize);
+        }
+        
+        texture.update();
+        
+        // Set pixel perfect settings
+        texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE);
+        texture.wrapU = Texture.WRAP_ADDRESSMODE;
+        texture.wrapV = Texture.WRAP_ADDRESSMODE;
+        texture.uScale = 10;
+        texture.vScale = 10;
+        
+        return texture;
+    }
+    
+    private setupCollisions(): void {
+        // Collision system will be implemented separately
+        console.log(`Created ${this.collisionBoxes.length} collision boxes`);
+    }
+    
+    public getPlayer(): HD2DAnimatedSprite {
+        return this.player;
+    }
+    
+    public getCollisionBoxes(): Array<{min: Vector3, max: Vector3}> {
+        return this.collisionBoxes;
+    }
+    
+    public getNPCs(): HD2DSprite[] {
+        return this.npcs;
+    }
+    
+    public getFountainWaterFlow(): FountainWaterFlow {
+        return this.fountainWaterFlow;
+    }
+}
