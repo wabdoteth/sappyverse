@@ -1,5 +1,7 @@
 // HD-2D Game Entry Point
 import { HD2DGame } from './HD2DGame';
+import '@babylonjs/core/Debug/debugLayer';
+import '@babylonjs/inspector';
 
 // Wait for DOM to be ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -34,6 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
             <button id="toggleOutlines" style="display: block; margin: 5px 0; width: 100%;">Enable HD-2D Outlines</button>
             <button id="toggleParticles" style="display: block; margin: 5px 0; width: 100%;">Disable Particles</button>
             <button id="toggleFog" style="display: block; margin: 5px 0; width: 100%;">Disable Fog</button>
+            <button id="toggleDithering" style="display: block; margin: 5px 0; width: 100%;">Disable Dithering</button>
+            <hr style="margin: 10px 0;">
+            <button id="toggleInspector" style="display: block; margin: 5px 0; width: 100%; background: #4CAF50; color: white;">Open Babylon Inspector</button>
             <hr style="margin: 10px 0;">
             <div style="margin: 10px 0;">
                 <strong>Time of Day</strong>
@@ -85,6 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('toggleCollisions')?.addEventListener('click', (e) => {
             collisionsVisible = !collisionsVisible;
             game.toggleDebugVisuals(collisionsVisible);
+            game.toggleCollisionDebug(collisionsVisible); // Also toggle the green wireframe colliders
             (e.target as HTMLButtonElement).textContent = collisionsVisible ? 'Hide Collision Debug' : 'Show Collision Debug';
         });
         
@@ -110,6 +116,28 @@ document.addEventListener('DOMContentLoaded', () => {
             fogEnabled = !fogEnabled;
             game.toggleFog(fogEnabled);
             (e.target as HTMLButtonElement).textContent = fogEnabled ? 'Disable Fog' : 'Enable Fog';
+        });
+        
+        // Dithering toggle
+        let ditheringEnabled = true; // Dithering is enabled by default (0.1 strength)
+        document.getElementById('toggleDithering')?.addEventListener('click', (e) => {
+            ditheringEnabled = !ditheringEnabled;
+            game.toggleDithering(ditheringEnabled);
+            (e.target as HTMLButtonElement).textContent = ditheringEnabled ? 'Disable Dithering' : 'Enable Dithering';
+        });
+        
+        // Inspector toggle
+        document.getElementById('toggleInspector')?.addEventListener('click', () => {
+            const scene = game.getScene();
+            if (scene.debugLayer.isVisible()) {
+                scene.debugLayer.hide();
+            } else {
+                scene.debugLayer.show({
+                    handleResize: true,
+                    overlay: false,
+                    embedMode: true
+                });
+            }
         });
         
         // Time controls
@@ -146,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (fpsSpan) {
                 fpsSpan.textContent = game.getEngine().getFps().toFixed(0);
             }
-            if (drawCallsSpan) {
+            if (drawCallsSpan && game.getScene()._drawCalls !== undefined) {
                 drawCallsSpan.textContent = game.getScene()._drawCalls.toString();
             }
             // Update time display

@@ -121,10 +121,12 @@ export class HD2DGame {
     private townScene: HD2DTownScene;
     private player: HD2DAnimatedSprite;
     private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
+    private playerCollisionMesh: Mesh | null = null; // Persistent collision mesh for player
     
     // Input
     private keys: { [key: string]: boolean } = {};
     private moveSpeed: number = 5.0; // Units per second
+    private isRotatingCamera: boolean = false; // Flag to disable target updates during rotation
     
     // Debug
     private debugMeshes: Mesh[] = [];
@@ -319,10 +321,34 @@ export class HD2DGame {
         // Get collision boxes
         this.collisionBoxes = this.townScene.getCollisionBoxes();
         
-        // Focus camera on player
+        // Create player collision mesh (invisible cylinder for player bounds)
         if (this.player) {
+            const spriteWidth = 3;
+            const playerCollisionWidth = (22 / 96) * spriteWidth;
+            
+            this.playerCollisionMesh = CreateCylinder('playerCollisionMesh', {
+                diameter: playerCollisionWidth,
+                height: 1.8,
+                tessellation: 8
+            }, this.scene);
+            
+            this.playerCollisionMesh.position = this.player.position.clone();
+            this.playerCollisionMesh.isVisible = false; // Invisible
+            this.playerCollisionMesh.isPickable = false;
+            
+            // Focus camera on player
             this.mainCamera.target = this.player.position;
         }
+        
+        // Debug camera info
+        console.log('Camera setup complete:', {
+            type: this.mainCamera.constructor.name,
+            position: this.mainCamera.position,
+            target: this.mainCamera.target,
+            alpha: this.mainCamera.alpha,
+            beta: this.mainCamera.beta,
+            radius: this.mainCamera.radius
+        });
         
         // Create ambient particles
         this.hd2dParticles = new HD2DParticles(this.scene);
@@ -408,12 +434,51 @@ export class HD2DGame {
         // Keyboard input
         this.scene.actionManager = new ActionManager(this.scene);
         
+        // Camera rotation variables (moved to higher scope)
+        let originalAlpha = this.mainCamera.alpha;
+        let originalBeta = this.mainCamera.beta;
+        let originalTarget = this.mainCamera.target.clone();
+        let tempAlpha = originalAlpha;
+        let tempBeta = originalBeta;
+        
         // Key down
         this.scene.actionManager.registerAction(
             new ExecuteCodeAction(
                 ActionManager.OnKeyDownTrigger,
                 (evt) => {
                     this.keys[evt.sourceEvent.key.toLowerCase()] = true;
+                    
+                    // Camera rotation debug mode (Space key)
+                    if (evt.sourceEvent.key === ' ' && !this.isRotatingCamera) {
+                        console.log('Space key pressed - Enabling rotation mode');
+                        this.isRotatingCamera = true;
+                        // Store current camera state
+                        originalAlpha = this.mainCamera.alpha;
+                        originalBeta = this.mainCamera.beta;
+                        originalTarget = this.mainCamera.target.clone();
+                        tempAlpha = originalAlpha;
+                        tempBeta = originalBeta;
+                        console.log('Camera state stored - Alpha:', originalAlpha, 'Beta:', originalBeta);
+                        console.log('Camera target stored:', originalTarget);
+                        console.log('Camera limits before removal:', {
+                            alphaLower: this.mainCamera.lowerAlphaLimit,
+                            alphaUpper: this.mainCamera.upperAlphaLimit,
+                            betaLower: this.mainCamera.lowerBetaLimit,
+                            betaUpper: this.mainCamera.upperBetaLimit
+                        });
+                        // Temporarily remove rotation limits
+                        this.mainCamera.lowerAlphaLimit = null;
+                        this.mainCamera.upperAlphaLimit = null;
+                        this.mainCamera.lowerBetaLimit = null;
+                        this.mainCamera.upperBetaLimit = null;
+                        console.log('Camera rotation mode ENABLED - limits removed');
+                        
+                        // Ensure camera is focused on player during rotation
+                        if (this.player) {
+                            this.mainCamera.target = this.player.position;
+                            console.log('Camera anchored to player at:', this.player.position);
+                        }
+                    }
                 }
             )
         );
@@ -426,9 +491,27 @@ export class HD2DGame {
                     this.keys[evt.sourceEvent.key.toLowerCase()] = false;
                     
                     // UI interactions
-                    if (evt.sourceEvent.key === 'Enter' || evt.sourceEvent.key === ' ') {
-                        // Close dialogue on Enter/Space
+                    if (evt.sourceEvent.key === 'Enter') {
+                        // Close dialogue on Enter
                         this.uiSystem.hideDialogue();
+                    }
+                    
+                    // Camera rotation debug mode (Space key)
+                    if (evt.sourceEvent.key === ' ') {
+                        console.log('Space key released - Disabling rotation mode');
+                        this.isRotatingCamera = false;
+                        // Restore original camera state
+                        this.mainCamera.alpha = originalAlpha;
+                        this.mainCamera.beta = originalBeta;
+                        this.mainCamera.target = originalTarget.clone();
+                        console.log('Camera state restored - Alpha:', this.mainCamera.alpha, 'Beta:', this.mainCamera.beta);
+                        console.log('Camera target restored:', this.mainCamera.target);
+                        // Restore rotation limits
+                        this.mainCamera.lowerBetaLimit = this.mainCamera.beta;
+                        this.mainCamera.upperBetaLimit = this.mainCamera.beta;
+                        this.mainCamera.lowerAlphaLimit = this.mainCamera.alpha;
+                        this.mainCamera.upperAlphaLimit = this.mainCamera.alpha;
+                        console.log('Camera limits restored');
                     }
                     
                     // NPC interaction
@@ -438,6 +521,55 @@ export class HD2DGame {
                 }
             )
         );
+        
+        // Mouse movement for camera rotation (when space is held)
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+        let mouseInitialized = false;
+        
+        this.canvas.addEventListener('mousemove', (evt) => {
+            if (!mouseInitialized) {
+                lastMouseX = evt.clientX;
+                lastMouseY = evt.clientY;
+                mouseInitialized = true;
+            }
+            
+            if (this.isRotatingCamera) {
+                const deltaX = evt.clientX - lastMouseX;
+                const deltaY = evt.clientY - lastMouseY;
+                
+                // Update temporary rotation values
+                tempAlpha -= deltaX * 0.01;
+                tempBeta -= deltaY * 0.01;
+                
+                // Clamp beta to prevent flipping
+                tempBeta = Math.max(0.1, Math.min(Math.PI - 0.1, tempBeta));
+                
+                console.log('Rotating camera - Delta:', deltaX, deltaY);
+                console.log('New rotation - Alpha:', tempAlpha.toFixed(3), 'Beta:', tempBeta.toFixed(3));
+                
+                // Apply rotation
+                this.mainCamera.alpha = tempAlpha;
+                this.mainCamera.beta = tempBeta;
+                
+                // Ensure camera stays focused on player during rotation
+                if (this.player) {
+                    this.mainCamera.target = this.player.position;
+                }
+                
+                // Check if rotation was actually applied
+                console.log('Camera actual - Alpha:', this.mainCamera.alpha.toFixed(3), 'Beta:', this.mainCamera.beta.toFixed(3));
+                console.log('Camera target:', this.mainCamera.target);
+            }
+            
+            lastMouseX = evt.clientX;
+            lastMouseY = evt.clientY;
+        });
+        
+        // Prevent context menu on right click
+        this.canvas.addEventListener('contextmenu', (evt) => {
+            evt.preventDefault();
+        });
     }
     
     private update(): void {
@@ -502,8 +634,10 @@ export class HD2DGame {
                 const newPosition = this.player.position.add(finalMovement);
                 this.player.setPosition(newPosition);
                 
-                // Update camera target
-                this.mainCamera.target = this.player.position;
+                // Update camera target only if not in rotation mode
+                if (!this.isRotatingCamera) {
+                    this.mainCamera.target = this.player.position;
+                }
                 
                 // Update sprite direction based on actual movement
                 this.updateSpriteDirection(
@@ -547,6 +681,7 @@ export class HD2DGame {
         const playerCollisionWidth = (22 / 96) * spriteWidth; // ~0.6875 units
         const halfWidth = playerCollisionWidth / 2;
         
+        // Check bounding box collisions
         for (const box of this.collisionBoxes) {
             // Check collision with no padding - exact collision when character touches
             if (position.x + halfWidth > box.min.x && 
@@ -554,6 +689,46 @@ export class HD2DGame {
                 position.z > box.min.z && 
                 position.z < box.max.z) {
                 return true; // Collision detected
+            }
+        }
+        
+        // Check mesh collisions using precise mesh intersection
+        if (this.playerCollisionMesh) {
+            // Update player collision mesh position to test position
+            this.playerCollisionMesh.position.copyFrom(position);
+            this.playerCollisionMesh.position.y = position.y + 0.9; // Center of player
+            this.playerCollisionMesh.computeWorldMatrix(true);
+            
+            // Check against all meshes with collision enabled
+            for (const mesh of this.scene.meshes) {
+                if (mesh.checkCollisions && mesh.isEnabled() && mesh.isVisible) {
+                    // Skip player's own mesh, shadows, debug meshes, and the collision mesh itself
+                    if (mesh === this.player.mesh || mesh.name.includes('_shadow') || 
+                        mesh.name.includes('Debug') || mesh.name.includes('_collider') ||
+                        mesh === this.playerCollisionMesh) {
+                        continue;
+                    }
+                    
+                    // First do a quick bounding box check for performance
+                    mesh.computeWorldMatrix(true);
+                    const meshBounds = mesh.getBoundingInfo().boundingBox;
+                    const playerBounds = this.playerCollisionMesh.getBoundingInfo().boundingBox;
+                    
+                    // Quick AABB check - if bounding boxes don't overlap, skip precise check
+                    if (playerBounds.maximumWorld.x < meshBounds.minimumWorld.x || 
+                        playerBounds.minimumWorld.x > meshBounds.maximumWorld.x ||
+                        playerBounds.maximumWorld.z < meshBounds.minimumWorld.z || 
+                        playerBounds.minimumWorld.z > meshBounds.maximumWorld.z) {
+                        continue; // Bounding boxes don't overlap
+                    }
+                    
+                    // Now do precise mesh intersection
+                    // The 'true' parameter enables precise intersection testing
+                    if (this.playerCollisionMesh.intersectsMesh(mesh, true)) {
+                        console.log(`Mesh intersection detected with: ${mesh.name}`);
+                        return true; // Collision detected
+                    }
+                }
             }
         }
         
@@ -751,6 +926,16 @@ export class HD2DGame {
         }
     }
     
+    public toggleCollisionDebug(visible: boolean): void {
+        // Toggle visibility of all collision debug meshes (green wireframes)
+        this.scene.meshes.forEach(mesh => {
+            if (mesh.name.includes('_collider')) {
+                mesh.setEnabled(visible);
+            }
+        });
+        console.log(`Collision debug meshes: ${visible ? 'shown' : 'hidden'}`);
+    }
+    
     public toggleParticles(enabled: boolean): void {
         if (this.hd2dParticles) {
             this.hd2dParticles.setEnabled(enabled);
@@ -810,6 +995,13 @@ export class HD2DGame {
         }
     }
     
+    public toggleDithering(enabled: boolean): void {
+        if (this.retroPostProcess) {
+            this.retroPostProcess.setDitherStrength(enabled ? 0.1 : 0);
+            console.log(`Dithering: ${enabled ? 'ON' : 'OFF'}`);
+        }
+    }
+    
     private showInteractionMenu(): void {
         this.uiSystem.showMenu("Actions", [
             "Talk to NPC",
@@ -826,7 +1018,36 @@ export class HD2DGame {
                     this.uiSystem.showDialogue("HP: 75/100 | MP: 50/100 | Level: 5", "Status");
                     break;
                 case 2:
-                    this.uiSystem.showDialogue("Settings menu coming soon!", "System");
+                    this.showSettingsMenu();
+                    break;
+            }
+        });
+    }
+    
+    private showSettingsMenu(): void {
+        const currentDitherState = this.retroPostProcess.getDitherStrength() > 0 ? "ON" : "OFF";
+        const retroState = this.retroPostProcess.enabled ? "ON" : "OFF";
+        
+        this.uiSystem.showMenu("Settings", [
+            `Dithering: ${currentDitherState}`,
+            `Retro Effect: ${retroState}`,
+            "Back"
+        ], (index) => {
+            switch (index) {
+                case 0:
+                    // Toggle dithering
+                    const currentStrength = this.retroPostProcess.getDitherStrength();
+                    this.retroPostProcess.setDitherStrength(currentStrength > 0 ? 0 : 0.1);
+                    this.showSettingsMenu(); // Refresh menu to show updated state
+                    break;
+                case 1:
+                    // Toggle retro effect on/off
+                    this.retroPostProcess.enabled = !this.retroPostProcess.enabled;
+                    this.showSettingsMenu(); // Refresh menu
+                    break;
+                case 2:
+                    // Go back to main menu
+                    this.showInteractionMenu();
                     break;
             }
         });

@@ -4,6 +4,8 @@ import { Engine } from '@babylonjs/core/Engines/engine';
 import { Effect } from '@babylonjs/core/Materials/effect';
 
 export class RetroPostProcess extends PostProcess {
+    private currentDitherStrength: number = 0.1;
+    
     constructor(name: string, camera: Camera, options?: any, samplingMode?: number, engine?: Engine, reusable?: boolean) {
         
         Effect.ShadersStore['retroFragmentShader'] = `
@@ -74,7 +76,7 @@ export class RetroPostProcess extends PostProcess {
         
         this.onApply = (effect: Effect) => {
             effect.setFloat('colorLevels', 16.0); // 16 color levels per channel
-            effect.setFloat('ditherStrength', 0.1); // Subtle dithering
+            effect.setFloat('ditherStrength', this.currentDitherStrength); // Use configurable dithering
             const currentEngine = this.getEngine();
             effect.setFloat2('screenSize', currentEngine.getRenderWidth(), currentEngine.getRenderHeight());
         };
@@ -83,8 +85,23 @@ export class RetroPostProcess extends PostProcess {
     public setColorLevels(levels: number): void {
         this.onApply = (effect: Effect) => {
             effect.setFloat('colorLevels', levels);
-            effect.setFloat('ditherStrength', 0.1);
+            effect.setFloat('ditherStrength', this.currentDitherStrength);
             effect.setFloat2('screenSize', this.getEngine().getRenderWidth(), this.getEngine().getRenderHeight());
         };
+    }
+    
+    public setDitherStrength(strength: number): void {
+        this.currentDitherStrength = strength;
+        if (this.onApply) {
+            this.onApply = (effect: Effect) => {
+                effect.setFloat('colorLevels', 16.0);
+                effect.setFloat('ditherStrength', this.currentDitherStrength);
+                effect.setFloat2('screenSize', this.getEngine().getRenderWidth(), this.getEngine().getRenderHeight());
+            };
+        }
+    }
+    
+    public getDitherStrength(): number {
+        return this.currentDitherStrength;
     }
 }

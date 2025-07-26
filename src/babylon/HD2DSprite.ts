@@ -4,6 +4,7 @@ import { Engine } from '@babylonjs/core/Engines/engine';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { Material } from '@babylonjs/core/Materials/material';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -88,19 +89,23 @@ export class HD2DSprite {
         this.material.ambientColor = new Color3(1, 1, 1);
         this.material.useAlphaFromDiffuseTexture = true;
         this.material.backFaceCulling = false;
-        this.material.transparencyMode = 1; // ALPHATEST mode for proper shadow alpha
+        this.material.transparencyMode = Material.MATERIAL_ALPHATEST; // Use alpha test to discard transparent pixels
         this.material.alphaMode = Engine.ALPHA_COMBINE;
+        this.material.alphaCutOff = 0.4; // Discard pixels with alpha < 0.4
         
         mesh.material = this.material;
         
         // Set billboard mode
         mesh.billboardMode = this.options.billboardMode!;
         
-        // Set rendering layer
-        mesh.renderingGroupId = 2; // Sprite layer
+        // Set rendering layer - use same as world objects for proper depth sorting
+        mesh.renderingGroupId = 1; // Same as buildings/props for proper occlusion
         
         // Enable alpha index for proper sorting
         mesh.alphaIndex = 0;
+        
+        // Ensure mesh updates its bounding box for proper culling
+        mesh.refreshBoundingInfo();
         
         return mesh;
     }

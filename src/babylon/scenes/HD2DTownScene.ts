@@ -1,7 +1,9 @@
 // HD-2D Town Scene Implementation
 import { Scene } from '@babylonjs/core/scene';
+import { Engine } from '@babylonjs/core/Engines/engine';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
+import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder';
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
@@ -13,10 +15,14 @@ import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTextur
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import { SceneLoader } from '@babylonjs/core/Loading/sceneLoader';
+import '@babylonjs/loaders/glTF'; // Import GLB loader
 import { HD2DAnimatedSprite } from '../HD2DAnimatedSprite';
 import { HD2DSprite } from '../HD2DSprite';
 import { AnimatedWaterMaterial } from '../materials/AnimatedWaterMaterial';
 import { FountainWaterFlow } from '../effects/FountainWaterFlow';
+import { ModelLoader, Props3D } from '../loaders/ModelLoader';
 
 export class HD2DTownScene {
     private scene: Scene;
@@ -30,15 +36,13 @@ export class HD2DTownScene {
     }
     
     public async build(): Promise<void> {
-        console.log('Building HD-2D Town Scene...');
-        
         // Set scene ambiance
         this.scene.clearColor = new Color4(0.5, 0.7, 0.9, 1); // Sky blue
         
         // Create environment
         this.createGround();
         this.createTownSquare();
-        this.createBuildings();
+        await this.createBuildings();
         this.createTrees();
         this.createFountain();
         this.createLampPosts();
@@ -47,13 +51,14 @@ export class HD2DTownScene {
         await this.createPlayer();
         await this.createNPCs();
         
+        // Create 3D props
+        await this.create3DProps();
+        
         // Set up collision boxes
         this.setupCollisions();
         
         // Create fountain water flow after sprites
         this.fountainWaterFlow = new FountainWaterFlow(this.scene, new Vector3(0, 0, 0));
-        
-        console.log('HD-2D Town Scene built successfully!');
     }
     
     private createGround(): void {
@@ -87,7 +92,18 @@ export class HD2DTownScene {
         townSquare.position.y = 0.01;
         
         const squareMat = new PBRMaterial('squareMat', this.scene);
-        squareMat.albedoColor = new Color3(0.5, 0.5, 0.5);
+        
+        // Load 1b texture
+        const texture1b = new Texture('/assets/textures/1b.png', this.scene);
+        texture1b.updateSamplingMode(Texture.TRILINEAR_SAMPLINGMODE);
+        
+        // Configure texture repeating for smooth tiling
+        texture1b.wrapU = Texture.WRAP_ADDRESSMODE;
+        texture1b.wrapV = Texture.WRAP_ADDRESSMODE;
+        texture1b.uScale = 14; // Middle ground for texture size
+        texture1b.vScale = 14; // Middle ground for texture size
+        
+        squareMat.albedoTexture = texture1b;
         squareMat.roughness = 0.8;
         squareMat.metallic = 0;
         
@@ -96,19 +112,22 @@ export class HD2DTownScene {
         townSquare.renderingGroupId = 0;
     }
     
-    private createBuildings(): void {
+    private async createBuildings(): Promise<void> {
         // Building positions and sizes from original
         const buildings = [
-            { name: 'smithy', pos: new Vector3(-10, 0, 10), size: { w: 4, h: 5, d: 4 }, color: new Color3(0.5, 0.4, 0.3) },
             { name: 'shop', pos: new Vector3(10, 0, 10), size: { w: 5, h: 4, d: 4 }, color: new Color3(0.6, 0.5, 0.4) },
             { name: 'inn', pos: new Vector3(0, 0, 15), size: { w: 6, h: 6, d: 5 }, color: new Color3(0.7, 0.6, 0.5) },
             { name: 'house1', pos: new Vector3(-8, 0, -5), size: { w: 3, h: 4, d: 3 }, color: new Color3(0.6, 0.5, 0.4) },
             { name: 'house2', pos: new Vector3(8, 0, -5), size: { w: 3, h: 4, d: 3 }, color: new Color3(0.5, 0.5, 0.4) }
         ];
         
+        // Create procedural buildings
         buildings.forEach(buildingData => {
             this.createBuildingWithRoof(buildingData);
         });
+        
+        // Load blacksmith building
+        await this.loadBlacksmith();
     }
     
     private createBuildingWithRoof(data: any): void {
@@ -179,6 +198,131 @@ export class HD2DTownScene {
                 data.size.h,
                 data.pos.z + data.size.d/2
             )
+        });
+    }
+    
+    private async loadBlacksmith(): Promise<void> {
+        try {
+            console.log('Loading blacksmith model...');
+            
+            // Position where the blacksmith was before
+            const blacksmithPosition = new Vector3(-10, 0, 10);
+            
+            // Load the GLB model
+            const result = await SceneLoader.LoadAssetContainerAsync(
+                '/assets/models/',
+                'blacksmith.glb',
+                this.scene
+            );
+            
+            // Instantiate the loaded meshes
+            const blacksmithMeshes = result.instantiateModelsToScene();
+            
+            console.log(`Loaded ${blacksmithMeshes.rootNodes.length} root nodes for blacksmith`);
+            
+            // Find the main mesh with geometry
+            let blacksmithMesh: Mesh | null = null;
+            for (const rootNode of blacksmithMeshes.rootNodes) {
+                if (rootNode instanceof Mesh && rootNode.getTotalVertices() > 0) {
+                    blacksmithMesh = rootNode;
+                    break;
+                }
+                
+                // Check children
+                const children = rootNode.getChildMeshes();
+                for (const child of children) {
+                    if (child instanceof Mesh && child.getTotalVertices() > 0) {
+                        blacksmithMesh = child;
+                        break;
+                    }
+                }
+                
+                if (blacksmithMesh) break;
+            }
+            
+            if (!blacksmithMesh) {
+                console.error('No mesh with geometry found in blacksmith model');
+                return;
+            }
+            
+            console.log(`Found blacksmith mesh: ${blacksmithMesh.name} with ${blacksmithMesh.getTotalVertices()} vertices`);
+            
+            // Get the root node to apply transformations
+            const rootNode = blacksmithMeshes.rootNodes[0];
+            if (rootNode) {
+                rootNode.position = blacksmithPosition;
+                rootNode.scaling = new Vector3(5, 5, 5); // Scale up by 5x as before
+                
+                // Compute bounds to position correctly on ground
+                blacksmithMesh.computeWorldMatrix(true);
+                const bounds = blacksmithMesh.getBoundingInfo().boundingBox;
+                const minY = bounds.minimumWorld.y;
+                
+                // Adjust Y position to sit on ground if needed
+                if (minY < 0) {
+                    rootNode.position.y = -minY;
+                }
+                
+                console.log(`Blacksmith positioned at: ${rootNode.position}`);
+            }
+            
+            // Set rendering properties
+            blacksmithMeshes.rootNodes.forEach(node => {
+                node.getChildMeshes().forEach(mesh => {
+                    if (mesh instanceof Mesh) {
+                        mesh.renderingGroupId = 1; // Same as buildings
+                        mesh.receiveShadows = true;
+                        mesh.isVisible = true;
+                    }
+                });
+            });
+            
+            // Create mesh collider for the blacksmith
+            if (blacksmithMesh) {
+                this.createBlacksmithMeshCollider(blacksmithMesh);
+            }
+            
+            // Add simple collision box
+            const size = 8; // Approximate size
+            this.collisionBoxes.push({
+                min: new Vector3(blacksmithPosition.x - size/2, 0, blacksmithPosition.z - size/2),
+                max: new Vector3(blacksmithPosition.x + size/2, 10, blacksmithPosition.z + size/2)
+            });
+            
+            console.log('Blacksmith loaded successfully');
+            
+        } catch (error) {
+            console.error('Failed to load blacksmith:', error);
+        }
+    }
+    
+    private createBlacksmithMeshCollider(blacksmithMesh: Mesh): void {
+        console.log('Creating mesh collider for blacksmith...');
+        
+        // Enable collision on the mesh itself
+        blacksmithMesh.checkCollisions = true;
+        
+        // Create a visual representation of the mesh collider
+        const colliderMesh = blacksmithMesh.clone(`${blacksmithMesh.name}_collider`);
+        
+        // Update world matrix to ensure correct positioning
+        colliderMesh.computeWorldMatrix(true);
+        
+        // Create wireframe material for visualization
+        const colliderMat = new StandardMaterial(`${blacksmithMesh.name}_colliderMat`, this.scene);
+        colliderMat.wireframe = true;
+        colliderMat.emissiveColor = new Color3(0, 1, 0); // Green wireframe
+        colliderMat.disableLighting = true;
+        colliderMat.alpha = 0.5; // Semi-transparent
+        
+        colliderMesh.material = colliderMat;
+        colliderMesh.isPickable = false;
+        colliderMesh.renderingGroupId = 2; // Render on top
+        
+        console.log('Mesh collider created for blacksmith:', {
+            meshName: blacksmithMesh.name,
+            vertices: blacksmithMesh.getTotalVertices(),
+            collisionEnabled: blacksmithMesh.checkCollisions
         });
     }
     
@@ -458,9 +602,134 @@ export class HD2DTownScene {
         return texture;
     }
     
+    private async create3DProps(): Promise<void> {
+        // Load a barrel next to the fountain
+        await this.loadBarrel();
+    }
+    
+    private createBarrelMeshCollider(barrelMesh: Mesh): void {
+        console.log('Creating mesh collider for barrel...');
+        
+        // Enable collision on the mesh itself
+        barrelMesh.checkCollisions = true;
+        
+        // Create a visual representation of the mesh collider
+        const colliderMesh = barrelMesh.clone(`${barrelMesh.name}_collider`);
+        
+        // Update world matrix to ensure correct positioning
+        colliderMesh.computeWorldMatrix(true);
+        
+        // Create wireframe material for visualization
+        const colliderMat = new StandardMaterial(`${barrelMesh.name}_colliderMat`, this.scene);
+        colliderMat.wireframe = true;
+        colliderMat.emissiveColor = new Color3(0, 1, 0); // Green wireframe
+        colliderMat.disableLighting = true;
+        colliderMat.alpha = 0.5; // Semi-transparent
+        
+        colliderMesh.material = colliderMat;
+        colliderMesh.isPickable = false;
+        colliderMesh.renderingGroupId = 2; // Render on top
+        
+        // The cloned mesh with wireframe acts as visual representation
+        // The original mesh has checkCollisions enabled for actual collision detection
+        
+        console.log('Mesh collider created:', {
+            meshName: barrelMesh.name,
+            vertices: barrelMesh.getTotalVertices(),
+            collisionEnabled: barrelMesh.checkCollisions
+        });
+    }
+    
+    private async loadBarrel(): Promise<void> {
+        try {
+            console.log('Loading barrel model...');
+            
+            // Create a simple scene loader for the barrel
+            const result = await SceneLoader.LoadAssetContainerAsync(
+                '/assets/models/',
+                'Make_a_wooden_barrel__0725233815_texture.glb',
+                this.scene
+            );
+            
+            // Instantiate the loaded meshes
+            const barrelMeshes = result.instantiateModelsToScene();
+            
+            console.log(`Loaded ${barrelMeshes.rootNodes.length} root nodes`);
+            
+            // Find the main mesh with geometry
+            let barrelMesh: Mesh | null = null;
+            for (const rootNode of barrelMeshes.rootNodes) {
+                if (rootNode instanceof Mesh && rootNode.getTotalVertices() > 0) {
+                    barrelMesh = rootNode;
+                    break;
+                }
+                
+                // Check children
+                const children = rootNode.getChildMeshes();
+                for (const child of children) {
+                    if (child instanceof Mesh && child.getTotalVertices() > 0) {
+                        barrelMesh = child;
+                        break;
+                    }
+                }
+                
+                if (barrelMesh) break;
+            }
+            
+            if (!barrelMesh) {
+                console.error('No mesh with geometry found in barrel model');
+                return;
+            }
+            
+            console.log(`Found barrel mesh: ${barrelMesh.name} with ${barrelMesh.getTotalVertices()} vertices`);
+            
+            // Position next to fountain (fountain is at 0,0,0)
+            const barrelPosition = new Vector3(2.5, 0, 0);
+            
+            // Get the root node to apply transformations
+            const rootNode = barrelMeshes.rootNodes[0];
+            if (rootNode) {
+                rootNode.position = barrelPosition;
+                rootNode.scaling = new Vector3(1, 1, 1); // Default scale
+                
+                // Compute bounds to position correctly on ground
+                barrelMesh.computeWorldMatrix(true);
+                const bounds = barrelMesh.getBoundingInfo().boundingBox;
+                const minY = bounds.minimumWorld.y;
+                
+                // Adjust Y position to sit on ground
+                rootNode.position.y = -minY;
+                
+                console.log(`Barrel positioned at: ${rootNode.position}`);
+            }
+            
+            // Set rendering properties
+            barrelMeshes.rootNodes.forEach(node => {
+                node.getChildMeshes().forEach(mesh => {
+                    if (mesh instanceof Mesh) {
+                        mesh.renderingGroupId = 1; // Same as buildings
+                        mesh.receiveShadows = true;
+                        mesh.isVisible = true;
+                    }
+                });
+            });
+            
+            // Create mesh collider for the barrel
+            if (barrelMesh) {
+                this.createBarrelMeshCollider(barrelMesh);
+            }
+            
+            console.log('Barrel loaded successfully with mesh collider');
+            
+        } catch (error) {
+            console.error('Failed to load barrel:', error);
+        }
+    }
+    
+    
+    
     private setupCollisions(): void {
         // Collision system will be implemented separately
-        console.log(`Created ${this.collisionBoxes.length} collision boxes`);
     }
     
     public getPlayer(): HD2DAnimatedSprite {
