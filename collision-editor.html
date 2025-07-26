@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Collision Editor - Sappyverse</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #renderCanvas {
+            width: 100%;
+            height: 100vh;
+            touch-action: none;
+        }
+        
+        .file-input {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: none;
+        }
+        
+    </style>
+</head>
+<body>
+    <canvas id="renderCanvas"></canvas>
+    <input type="file" id="modelFile" accept=".glb,.gltf" class="file-input">
+    <input type="file" id="setupFile" accept=".json" class="file-input">
+    
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+    
+    <script>
+        // Simple inline version of the collision editor for quick testing
+        class CollisionEditor {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.engine = new BABYLON.Engine(canvas, true);
+                this.scene = new BABYLON.Scene(this.engine);
+                this.colliders = new Map();
+                this.currentTool = 'select';
+                
+                this.setupScene();
+                this.createMaterials();
+                this.createUI();
+                this.setupInputHandlers();
+                
+                this.engine.runRenderLoop(() => {
+                    this.scene.render();
+                });
+                
+                window.addEventListener('resize', () => {
+                    this.engine.resize();
+                });
+            }
+            
+            setupScene() {
+                this.scene.clearColor = new BABYLON.Color4(0.2, 0.2, 0.3, 1);
+                
+                this.camera = new BABYLON.UniversalCamera('camera', new BABYLON.Vector3(0, 10, -20), this.scene);
+                this.camera.setTarget(BABYLON.Vector3.Zero());
+                this.camera.attachControl(this.canvas, true);
+                
+                // Disable default keyboard controls to use our own WASD
+                this.camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
+                
+                new BABYLON.HemisphericLight('light1', new BABYLON.Vector3(0, 1, 0), this.scene);
+                new BABYLON.DirectionalLight('light2', new BABYLON.Vector3(-1, -2, 1), this.scene);
+                
+                const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 50, height: 50 }, this.scene);
+                const gridMat = new BABYLON.GridMaterial('gridMat', this.scene);
+                gridMat.majorUnitFrequency = 5;
+                gridMat.minorUnitVisibility = 0.45;
+                ground.material = gridMat;
+                
+                // Add origin marker
+                const originMarker = BABYLON.MeshBuilder.CreateSphere('originMarker', { diameter: 0.5, segments: 16 }, this.scene);
+                originMarker.position = new BABYLON.Vector3(0, 0.25, 0);
+                const originMat = new BABYLON.StandardMaterial('originMat', this.scene);
+                originMat.emissiveColor = new BABYLON.Color3(0, 1, 0);
+                originMat.disableLighting = true;
+                originMat.alpha = 0.5;
+                originMarker.material = originMat;
+                originMarker.isPickable = false;
+                
+                // Add origin label
+                const originPlane = BABYLON.MeshBuilder.CreatePlane('originLabel', { width: 2, height: 0.5 }, this.scene);
+                originPlane.position = new BABYLON.Vector3(0, 1, 0);
+                originPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+                const originTexture = new BABYLON.DynamicTexture('originTexture', { width: 256, height: 64 }, this.scene);
+                const ctx = originTexture.getContext();
+                ctx.font = '32px Arial';
+                ctx.fillStyle = 'white';
+                ctx.textAlign = 'center';
+                ctx.fillText('Origin (0,0,0)', 128, 40);
+                originTexture.update();
+                const originLabelMat = new BABYLON.StandardMaterial('originLabelMat', this.scene);
+                originLabelMat.diffuseTexture = originTexture;
+                originLabelMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+                originLabelMat.disableLighting = true;
+                originLabelMat.backFaceCulling = false;
+                originPlane.material = originLabelMat;
+                originPlane.isPickable = false;
+                
+                this.gizmoManager = new BABYLON.GizmoManager(this.scene);
+                this.gizmoManager.positionGizmoEnabled = true;
+                
+                // Scale gizmo constraints will be set up when needed
+            }
+            
+            createMaterials() {
+                this.materials = {
+                    wall: this.createMaterial('wall', new BABYLON.Color3(0.8, 0.2, 0.2)),
+                    cylinder: this.createMaterial('cylinder', new BABYLON.Color3(0.2, 0.8, 0.2)),
+                    floor: this.createMaterial('floor', new BABYLON.Color3(0.2, 0.2, 0.8)),
+                    ramp: this.createMaterial('ramp', new BABYLON.Color3(0.8, 0.2, 0.8)),
+                    selected: this.createMaterial('selected', new BABYLON.Color3(1, 1, 0))
+                };
+            }
+            
+            createMaterial(name, color) {
+                const mat = new BABYLON.StandardMaterial(name + 'Mat', this.scene);
+                mat.diffuseColor = color;
+                mat.alpha = 0.7;
+                mat.backFaceCulling = false;
+                mat.wireframe = false;
+                return mat;
+            }
+            
+            createUI() {
+                this.gui = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');
+                
+                // Create main container
+                const mainContainer = new BABYLON.GUI.Rectangle();
+                mainContainer.thickness = 0;
+                this.gui.addControl(mainContainer);
+                
+                // Create top toolbar
+                this.createTopToolbar();
+                
+                // Create left sidebar for tools
+                this.createLeftSidebar();
+                
+                // Create right sidebar for properties
+                this.createRightSidebar();
+                
+                // Create bottom status bar
+                this.createBottomStatusBar();
+                
+                // Initialize model dropdown
+                setTimeout(() => {
+                    this.createModelDropdown();
+                    this.refreshModelList();
+                }, 100);
+            }
+            
+            createTopToolbar() {
+                const toolbar = new BABYLON.GUI.Rectangle();
+                toolbar.width = "100%";
+                toolbar.height = "50px";
+                toolbar.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+                toolbar.background = "#2c2c2c";
+                toolbar.thickness = 0;
+                this.gui.addControl(toolbar);
+                
+                const toolbarStack = new BABYLON.GUI.StackPanel();
+                toolbarStack.isVertical = false;
+                toolbar.addControl(toolbarStack);
+                
+                // Title
+                const title = new BABYLON.GUI.TextBlock();
+                title.text = "Collision Editor";
+                title.width = "200px";
+                title.color = "white";
+                title.fontSize = 18;
+                title.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                title.paddingLeft = "20px";
+                toolbarStack.addControl(title);
+                
+                // Current tool indicator
+                const toolIndicator = new BABYLON.GUI.TextBlock();
+                toolIndicator.name = "toolIndicator";
+                toolIndicator.text = "Tool: Select";
+                toolIndicator.width = "200px";
+                toolIndicator.color = "#aaa";
+                toolIndicator.fontSize = 14;
+                toolIndicator.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+                toolbarStack.addControl(toolIndicator);
+            }
+            
+            createLeftSidebar() {
+                const sidebar = new BABYLON.GUI.Rectangle();
+                sidebar.width = "280px";
+                sidebar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                sidebar.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+                sidebar.top = "25px";
+                sidebar.background = "#353535";
+                sidebar.thickness = 0;
+                this.gui.addControl(sidebar);
+                
+                const sidebarStack = new BABYLON.GUI.StackPanel();
+                sidebarStack.paddingTop = "20px";
+                sidebarStack.paddingBottom = "20px";
+                sidebarStack.paddingLeft = "15px";
+                sidebarStack.paddingRight = "15px";
+                sidebar.addControl(sidebarStack);
+                
+                // Tools Section
+                this.createSection(sidebarStack, "TOOLS");
+                
+                const toolGrid = new BABYLON.GUI.Grid();
+                toolGrid.height = "80px";
+                toolGrid.addColumnDefinition(0.5);
+                toolGrid.addColumnDefinition(0.5);
+                toolGrid.addRowDefinition(40, false);
+                toolGrid.addRowDefinition(40, false);
+                sidebarStack.addControl(toolGrid);
+                
+                // Tool buttons
+                this.createToolButton(toolGrid, "Select [Q]", 'select', 0, 0);
+                this.createToolButton(toolGrid, "Move", 'move', 0, 1);
+                this.createToolButton(toolGrid, "Resize [E]", 'resize', 1, 0);
+                this.createToolButton(toolGrid, "Rotate [R]", 'rotate', 1, 1);
+                
+                this.addSeparator(sidebarStack);
+                
+                // Collider Types Section
+                this.createSection(sidebarStack, "COLLIDER TYPES");
+                
+                const colliderGrid = new BABYLON.GUI.Grid();
+                colliderGrid.height = "80px";
+                colliderGrid.addColumnDefinition(0.5);
+                colliderGrid.addColumnDefinition(0.5);
+                colliderGrid.addRowDefinition(40, false);
+                colliderGrid.addRowDefinition(40, false);
+                sidebarStack.addControl(colliderGrid);
+                
+                // Collider type buttons
+                this.createColliderButton(colliderGrid, "Box [1]", 'box', 0, 0);
+                this.createColliderButton(colliderGrid, "Cylinder [2]", 'cylinder', 0, 1);
+                this.createColliderButton(colliderGrid, "Floor [3]", 'floor', 1, 0);
+                this.createColliderButton(colliderGrid, "Ramp [4]", 'ramp', 1, 1);
+                
+                this.addSeparator(sidebarStack);
+                
+                // Model Section
+                this.createSection(sidebarStack, "MODEL");
+                
+                // Model dropdown container
+                const dropdownContainer = new BABYLON.GUI.Rectangle();
+                dropdownContainer.name = "dropdownContainer";
+                dropdownContainer.height = "35px";
+                dropdownContainer.thickness = 0;
+                sidebarStack.addControl(dropdownContainer);
+                
+                this.addSpace(sidebarStack, 5);
+                
+                this.createActionButton(sidebarStack, "Load Custom GLB", () => {
+                    document.getElementById('modelFile').click();
+                });
+                
+                this.createActionButton(sidebarStack, "Clear Scene", () => {
+                    if (confirm("Clear all colliders?")) {
+                        this.clearAllColliders();
+                    }
+                });
+            }
+            
+            createRightSidebar() {
+                const sidebar = new BABYLON.GUI.Rectangle();
+                sidebar.width = "250px";
+                sidebar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
+                sidebar.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+                sidebar.top = "25px";
+                sidebar.background = "#353535";
+                sidebar.thickness = 0;
+                this.gui.addControl(sidebar);
+                
+                const sidebarStack = new BABYLON.GUI.StackPanel();
+                sidebarStack.paddingTop = "20px";
+                sidebarStack.paddingBottom = "20px";
+                sidebarStack.paddingLeft = "15px";
+                sidebarStack.paddingRight = "15px";
+                sidebar.addControl(sidebarStack);
+                
+                // Properties Section
+                this.createSection(sidebarStack, "PROPERTIES");
+                
+                const noSelection = new BABYLON.GUI.TextBlock();
+                noSelection.name = "noSelectionText";
+                noSelection.text = "No collider selected";
+                noSelection.height = "30px";
+                noSelection.color = "#666";
+                noSelection.fontSize = 13;
+                noSelection.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+                sidebarStack.addControl(noSelection);
+                
+                // Selected collider info (hidden by default)
+                const propsContainer = new BABYLON.GUI.StackPanel();
+                propsContainer.name = "propsContainer";
+                propsContainer.isVisible = false;
+                sidebarStack.addControl(propsContainer);
+                
+                this.addSeparator(sidebarStack);
+                
+                // File Operations Section
+                this.createSection(sidebarStack, "FILE OPERATIONS");
+                
+                this.createActionButton(sidebarStack, "Save Setup", () => {
+                    this.saveCollisionSetup();
+                });
+                
+                this.createActionButton(sidebarStack, "Load Setup", () => {
+                    document.getElementById('setupFile').click();
+                });
+                
+                this.createActionButton(sidebarStack, "Export Backup", () => {
+                    this.exportBackup();
+                });
+                
+                this.addSeparator(sidebarStack);
+                
+                // Help Section
+                this.createSection(sidebarStack, "SHORTCUTS");
+                
+                const shortcuts = [
+                    "WASD - Move camera",
+                    "Mouse - Look around",
+                    "Q - Select tool",
+                    "E - Resize tool",
+                    "R - Rotate tool",
+                    "1-4 - Place colliders",
+                    "Delete - Remove selected",
+                    "Space - Reset camera"
+                ];
+                
+                shortcuts.forEach(shortcut => {
+                    const text = new BABYLON.GUI.TextBlock();
+                    text.text = shortcut;
+                    text.height = "18px";
+                    text.color = "#888";
+                    text.fontSize = 11;
+                    text.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                    sidebarStack.addControl(text);
+                });
+            }
+            
+            createBottomStatusBar() {
+                const statusBar = new BABYLON.GUI.Rectangle();
+                statusBar.width = "100%";
+                statusBar.height = "30px";
+                statusBar.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+                statusBar.background = "#2c2c2c";
+                statusBar.thickness = 0;
+                this.gui.addControl(statusBar);
+                
+                const statusStack = new BABYLON.GUI.StackPanel();
+                statusStack.isVertical = false;
+                statusBar.addControl(statusStack);
+                
+                // Grid position
+                const gridPos = new BABYLON.GUI.TextBlock();
+                gridPos.name = "gridPos";
+                gridPos.text = "Grid: 0, 0, 0";
+                gridPos.width = "150px";
+                gridPos.color = "#888";
+                gridPos.fontSize = 12;
+                gridPos.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                gridPos.paddingLeft = "20px";
+                statusStack.addControl(gridPos);
+                
+                // Collider count
+                const colliderCount = new BABYLON.GUI.TextBlock();
+                colliderCount.name = "colliderCount";
+                colliderCount.text = "Colliders: 0";
+                colliderCount.width = "150px";
+                colliderCount.color = "#888";
+                colliderCount.fontSize = 12;
+                colliderCount.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+                statusStack.addControl(colliderCount);
+                
+                // Camera info
+                const cameraInfo = new BABYLON.GUI.TextBlock();
+                cameraInfo.name = "cameraInfo";
+                cameraInfo.text = "Camera: 0, 10, -20";
+                cameraInfo.width = "200px";
+                cameraInfo.color = "#888";
+                cameraInfo.fontSize = 12;
+                cameraInfo.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
+                cameraInfo.paddingRight = "20px";
+                statusStack.addControl(cameraInfo);
+            }
+            
+            // Helper methods
+            createSection(parent, title) {
+                const header = new BABYLON.GUI.TextBlock();
+                header.text = title;
+                header.height = "25px";
+                header.color = "white";
+                header.fontSize = 13;
+                header.fontWeight = "bold";
+                header.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                parent.addControl(header);
+                
+                this.addSpace(parent, 10);
+            }
+            
+            createToolButton(grid, text, toolId, row, col) {
+                const btn = BABYLON.GUI.Button.CreateSimpleButton(toolId + "Btn", text);
+                btn.width = "125px";
+                btn.height = "35px";
+                btn.color = "white";
+                btn.background = this.currentTool === toolId ? "#4a9eff" : "#404040";
+                btn.thickness = 1;
+                btn.cornerRadius = 4;
+                btn.fontSize = 12;
+                btn.name = "tool_" + toolId;
+                btn.onPointerClickObservable.add(() => {
+                    this.setTool(toolId);
+                });
+                
+                // Hover effect
+                btn.onPointerEnterObservable.add(() => {
+                    if (this.currentTool !== toolId) {
+                        btn.background = "#505050";
+                    }
+                });
+                btn.onPointerOutObservable.add(() => {
+                    if (this.currentTool !== toolId) {
+                        btn.background = "#404040";
+                    }
+                });
+                
+                grid.addControl(btn, row, col);
+            }
+            
+            createColliderButton(grid, text, colliderType, row, col) {
+                const btn = BABYLON.GUI.Button.CreateSimpleButton(colliderType + "Btn", text);
+                btn.width = "125px";
+                btn.height = "35px";
+                btn.color = "white";
+                btn.background = "#404040";
+                btn.thickness = 1;
+                btn.cornerRadius = 4;
+                btn.fontSize = 12;
+                btn.onPointerClickObservable.add(() => {
+                    this.currentTool = colliderType;
+                    this.placeCollider(BABYLON.Vector3.Zero());
+                });
+                
+                // Hover effect
+                btn.onPointerEnterObservable.add(() => {
+                    btn.background = "#505050";
+                });
+                btn.onPointerOutObservable.add(() => {
+                    btn.background = "#404040";
+                });
+                
+                grid.addControl(btn, row, col);
+            }
+            
+            createActionButton(parent, text, callback) {
+                const btn = BABYLON.GUI.Button.CreateSimpleButton(text, text);
+                btn.width = "100%";
+                btn.height = "35px";
+                btn.color = "white";
+                btn.background = "#404040";
+                btn.thickness = 1;
+                btn.cornerRadius = 4;
+                btn.fontSize = 12;
+                btn.paddingTop = "5px";
+                btn.paddingBottom = "5px";
+                btn.onPointerClickObservable.add(callback);
+                parent.addControl(btn);
+                
+                // Add space after button
+                this.addSpace(parent, 5);
+                
+                // Add hover effect
+                btn.onPointerEnterObservable.add(() => {
+                    btn.background = "#505050";
+                });
+                btn.onPointerOutObservable.add(() => {
+                    btn.background = "#404040";
+                });
+                
+                return btn;
+            }
+            
+            addSeparator(parent) {
+                this.addSpace(parent, 15);
+                const sep = new BABYLON.GUI.Rectangle();
+                sep.width = "100%";
+                sep.height = "1px";
+                sep.background = "#444";
+                sep.thickness = 0;
+                parent.addControl(sep);
+                this.addSpace(parent, 15);
+            }
+            
+            addSpace(parent, height) {
+                const space = new BABYLON.GUI.Rectangle();
+                space.height = height + "px";
+                space.thickness = 0;
+                parent.addControl(space);
+            }
+            
+            setTool(toolId) {
+                this.currentTool = toolId;
+                
+                // Update gizmos based on tool
+                this.gizmoManager.positionGizmoEnabled = toolId === 'move';
+                this.gizmoManager.scaleGizmoEnabled = toolId === 'resize';
+                this.gizmoManager.rotationGizmoEnabled = toolId === 'rotate';
+                
+                if (toolId === 'resize') {
+                    setTimeout(() => this.setupScaleConstraints(), 100);
+                }
+                
+                // Update UI
+                this.updateToolButtons();
+                this.updateToolIndicator();
+            }
+            
+            updateToolIndicator() {
+                const indicator = this.gui.getControlByName("toolIndicator");
+                if (indicator) {
+                    const toolNames = {
+                        'select': 'Select',
+                        'move': 'Move',
+                        'resize': 'Resize',
+                        'rotate': 'Rotate'
+                    };
+                    indicator.text = `Tool: ${toolNames[this.currentTool] || this.currentTool}`;
+                }
+            }
+            
+            clearAllColliders() {
+                this.colliders.forEach((data, mesh) => {
+                    mesh.dispose();
+                });
+                this.colliders.clear();
+                this.selectedCollider = null;
+                this.updateColliderCount();
+            }
+            
+            updateColliderCount() {
+                const counter = this.gui.getControlByName("colliderCount");
+                if (counter) {
+                    counter.text = `Colliders: ${this.colliders.size}`;
+                }
+            }
+            
+            updateStatusBar() {
+                // Update camera position
+                const cameraInfo = this.gui.getControlByName("cameraInfo");
+                if (cameraInfo && this.camera) {
+                    const pos = this.camera.position;
+                    cameraInfo.text = `Camera: ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}`;
+                }
+                
+                // Update grid position (mouse position on ground)
+                const gridPos = this.gui.getControlByName("gridPos");
+                if (gridPos) {
+                    const pickResult = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
+                    if (pickResult.hit && pickResult.pickedPoint) {
+                        const p = pickResult.pickedPoint;
+                        gridPos.text = `Grid: ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
+                    }
+                }
+            }
+            
+            setupScaleConstraints() {
+                // Set up scale constraints if not already done
+                if (this.gizmoManager.gizmos.scaleGizmo && !this.scaleConstraintsAdded) {
+                    this.scaleConstraintsAdded = true;
+                    
+                    this.gizmoManager.gizmos.scaleGizmo.onDragObservable.add(() => {
+                        if (this.selectedCollider) {
+                            const data = this.colliders.get(this.selectedCollider);
+                            if (data) {
+                                // Apply constraints based on shape type
+                                switch (data.type) {
+                                    case 'cylinder':
+                                        // Keep X and Z scale uniform for cylinders
+                                        const avgScale = (this.selectedCollider.scaling.x + this.selectedCollider.scaling.z) / 2;
+                                        this.selectedCollider.scaling.x = avgScale;
+                                        this.selectedCollider.scaling.z = avgScale;
+                                        break;
+                                    case 'floor':
+                                    case 'ramp':
+                                        // Keep Y scale minimal for floor/ramp
+                                        this.selectedCollider.scaling.y = Math.max(0.1, Math.min(0.5, this.selectedCollider.scaling.y));
+                                        break;
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            
+            
+            updateToolButtons() {
+                // Update tool button colors
+                ['select', 'move', 'resize', 'rotate'].forEach(toolId => {
+                    const btn = this.gui.getControlByName('tool_' + toolId);
+                    if (btn) {
+                        btn.background = this.currentTool === toolId ? "#4a9eff" : "#404040";
+                    }
+                });
+            }
+            
+            setupInputHandlers() {
+                // Model file input
+                document.getElementById('modelFile').addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const url = URL.createObjectURL(file);
+                        BABYLON.SceneLoader.LoadAssetContainer('', url, this.scene, (container) => {
+                            container.addAllToScene();
+                            if (this.loadedModel) {
+                                this.loadedModel.dispose();
+                            }
+                            this.loadedModel = container.instantiateModelsToScene().rootNodes[0];
+                            
+                            // Center and lock the model
+                            if (this.loadedModel) {
+                                this.loadedModel.position = new BABYLON.Vector3(0, 0, 0);
+                                this.loadedModel.rotation = new BABYLON.Vector3(0, 0, 0);
+                                
+                                // Make model non-pickable
+                                this.loadedModel.getChildMeshes().forEach(mesh => {
+                                    mesh.isPickable = false;
+                                });
+                            }
+                            
+                            URL.revokeObjectURL(url);
+                        });
+                    }
+                });
+                
+                // Setup file input
+                document.getElementById('setupFile').addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            try {
+                                const setup = JSON.parse(event.target.result);
+                                this.loadSetupData(setup);
+                            } catch (err) {
+                                alert('Invalid setup file');
+                            }
+                        };
+                        reader.readAsText(file);
+                    }
+                });
+                
+                // Click handler
+                this.scene.onPointerObservable.add((pointerInfo) => {
+                    if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
+                        const pickResult = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
+                        
+                        if (this.currentTool === 'select' || this.currentTool === 'resize') {
+                            if (pickResult.hit && this.colliders.has(pickResult.pickedMesh)) {
+                                this.selectCollider(pickResult.pickedMesh);
+                            }
+                        }
+                        // Note: Placement tools (box, cylinder, etc.) now use keyboard shortcuts only
+                    }
+                });
+                
+                // Keyboard controls
+                const keys = {};
+                this.scene.onKeyboardObservable.add((kbInfo) => {
+                    const key = kbInfo.event.key.toLowerCase();
+                    
+                    if (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN) {
+                        keys[key] = true;
+                        
+                        // Tool shortcuts - only when Ctrl is NOT pressed (to avoid conflicts with WASD movement)
+                        if (!kbInfo.event.ctrlKey && !kbInfo.event.altKey && !kbInfo.event.shiftKey) {
+                            switch(key) {
+                                case 'q':
+                                    this.setTool('select');
+                                    break;
+                                case 'e':
+                                    this.setTool('resize');
+                                    break;
+                                case 'r':
+                                    this.setTool('rotate');
+                                    break;
+                                case '1':
+                                    this.currentTool = 'box';
+                                    this.placeCollider(BABYLON.Vector3.Zero());
+                                    break;
+                                case '2':
+                                    this.currentTool = 'cylinder';
+                                    this.placeCollider(BABYLON.Vector3.Zero());
+                                    break;
+                                case '3':
+                                    this.currentTool = 'floor';
+                                    this.placeCollider(BABYLON.Vector3.Zero());
+                                    break;
+                                case '4':
+                                    this.currentTool = 'ramp';
+                                    this.placeCollider(BABYLON.Vector3.Zero());
+                                    break;
+                                case ' ':
+                                    // Reset camera view
+                                    this.camera.position = new BABYLON.Vector3(0, 10, -20);
+                                    this.camera.setTarget(BABYLON.Vector3.Zero());
+                                    break;
+                                case 'delete':
+                                    if (this.selectedCollider) {
+                                        this.colliders.delete(this.selectedCollider);
+                                        this.selectedCollider.dispose();
+                                        this.selectedCollider = null;
+                                        this.updateColliderCount();
+                                    }
+                                    break;
+                            }
+                        }
+                    } else if (kbInfo.type === BABYLON.KeyboardEventTypes.KEYUP) {
+                        keys[key] = false;
+                    }
+                });
+                
+                // WASD camera movement
+                this.scene.registerBeforeRender(() => {
+                    const speed = 0.3;
+                    
+                    // Get camera direction vectors
+                    const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
+                    const right = this.camera.getDirection(BABYLON.Vector3.Right());
+                    
+                    // Zero out Y component for horizontal movement only
+                    forward.y = 0;
+                    right.y = 0;
+                    forward.normalize();
+                    right.normalize();
+                    
+                    if (keys['w']) {
+                        this.camera.position.addInPlace(forward.scale(speed));
+                    }
+                    if (keys['s']) {
+                        this.camera.position.subtractInPlace(forward.scale(speed));
+                    }
+                    if (keys['a']) {
+                        this.camera.position.subtractInPlace(right.scale(speed));
+                    }
+                    if (keys['d']) {
+                        this.camera.position.addInPlace(right.scale(speed));
+                    }
+                    
+                    // Update status bar
+                    this.updateStatusBar();
+                });
+            }
+            
+            placeCollider(position) {
+                let mesh;
+                // Always place at origin
+                const origin = BABYLON.Vector3.Zero();
+                const data = {
+                    type: this.currentTool,
+                    position: origin.clone(),
+                    rotation: BABYLON.Vector3.Zero(),
+                    scale: BABYLON.Vector3.One()
+                };
+                
+                switch (this.currentTool) {
+                    case 'box':
+                        mesh = BABYLON.MeshBuilder.CreateBox('wall_' + Date.now(), { size: 2 }, this.scene);
+                        mesh.material = this.materials.wall;
+                        break;
+                    case 'cylinder':
+                        mesh = BABYLON.MeshBuilder.CreateCylinder('cyl_' + Date.now(), { diameter: 2, height: 3 }, this.scene);
+                        mesh.material = this.materials.cylinder;
+                        break;
+                    case 'floor':
+                        mesh = BABYLON.MeshBuilder.CreateBox('floor_' + Date.now(), { width: 4, height: 0.2, depth: 4 }, this.scene);
+                        mesh.material = this.materials.floor;
+                        data.isWalkable = true;
+                        break;
+                    case 'ramp':
+                        mesh = BABYLON.MeshBuilder.CreateBox('ramp_' + Date.now(), { width: 4, height: 0.2, depth: 4 }, this.scene);
+                        mesh.material = this.materials.ramp;
+                        mesh.rotation.x = Math.PI / 6;
+                        data.isWalkable = true;
+                        break;
+                }
+                
+                if (mesh) {
+                    mesh.position = origin;  // Place at origin
+                    this.colliders.set(mesh, data);
+                    this.updateColliderCount();
+                    
+                    // Visual feedback - flash the origin marker
+                    const originMarker = this.scene.getMeshByName('originMarker');
+                    if (originMarker) {
+                        const originalColor = originMarker.material.emissiveColor.clone();
+                        originMarker.material.emissiveColor = new BABYLON.Color3(1, 1, 0);  // Yellow flash
+                        setTimeout(() => {
+                            originMarker.material.emissiveColor = originalColor;
+                        }, 200);
+                    }
+                    
+                    // Auto-switch back to select tool and select the new collider
+                    this.currentTool = 'select';
+                    this.gizmoManager.positionGizmoEnabled = true;
+                    this.gizmoManager.scaleGizmoEnabled = false;
+                    this.selectCollider(mesh);
+                    this.updateToolIndicator();
+                }
+            }
+            
+            selectCollider(mesh) {
+                if (this.selectedCollider) {
+                    const data = this.colliders.get(this.selectedCollider);
+                    if (data) {
+                        this.selectedCollider.material = this.materials[data.type];
+                    }
+                }
+                
+                this.selectedCollider = mesh;
+                mesh.material = this.materials.selected;
+                this.gizmoManager.attachToMesh(mesh);
+                
+                // Enable appropriate gizmo based on current tool
+                if (this.currentTool === 'resize') {
+                    this.gizmoManager.scaleGizmoEnabled = true;
+                    this.gizmoManager.positionGizmoEnabled = false;
+                    // Set up scale constraints
+                    setTimeout(() => this.setupScaleConstraints(), 100);
+                } else {
+                    this.gizmoManager.positionGizmoEnabled = true;
+                    this.gizmoManager.scaleGizmoEnabled = false;
+                }
+                
+                // Update properties panel
+                this.updatePropertiesPanel();
+            }
+            
+            updatePropertiesPanel() {
+                const noSelectionText = this.gui.getControlByName("noSelectionText");
+                const propsContainer = this.gui.getControlByName("propsContainer");
+                
+                if (!this.selectedCollider || !this.colliders.has(this.selectedCollider)) {
+                    if (noSelectionText) noSelectionText.isVisible = true;
+                    if (propsContainer) propsContainer.isVisible = false;
+                    return;
+                }
+                
+                if (noSelectionText) noSelectionText.isVisible = false;
+                if (propsContainer) {
+                    propsContainer.isVisible = true;
+                    
+                    // Clear existing properties
+                    propsContainer.children.forEach(child => child.dispose());
+                    propsContainer.children = [];
+                    
+                    const data = this.colliders.get(this.selectedCollider);
+                    
+                    // Type
+                    const typeLabel = new BABYLON.GUI.TextBlock();
+                    typeLabel.text = `Type: ${data.type.charAt(0).toUpperCase() + data.type.slice(1)}`;
+                    typeLabel.height = "20px";
+                    typeLabel.color = "#ccc";
+                    typeLabel.fontSize = 12;
+                    typeLabel.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                    propsContainer.addControl(typeLabel);
+                    
+                    // Position
+                    const pos = this.selectedCollider.position;
+                    const posLabel = new BABYLON.GUI.TextBlock();
+                    posLabel.text = `Position: ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}`;
+                    posLabel.height = "20px";
+                    posLabel.color = "#ccc";
+                    posLabel.fontSize = 12;
+                    posLabel.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                    propsContainer.addControl(posLabel);
+                    
+                    // Scale
+                    const scale = this.selectedCollider.scaling;
+                    const scaleLabel = new BABYLON.GUI.TextBlock();
+                    scaleLabel.text = `Scale: ${scale.x.toFixed(1)}, ${scale.y.toFixed(1)}, ${scale.z.toFixed(1)}`;
+                    scaleLabel.height = "20px";
+                    scaleLabel.color = "#ccc";
+                    scaleLabel.fontSize = 12;
+                    scaleLabel.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                    propsContainer.addControl(scaleLabel);
+                    
+                    // Walkable status for floor/ramp
+                    if (data.type === 'floor' || data.type === 'ramp') {
+                        const walkableLabel = new BABYLON.GUI.TextBlock();
+                        walkableLabel.text = `Walkable: ${data.isWalkable ? 'Yes' : 'No'}`;
+                        walkableLabel.height = "20px";
+                        walkableLabel.color = "#ccc";
+                        walkableLabel.fontSize = 12;
+                        walkableLabel.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                        propsContainer.addControl(walkableLabel);
+                    }
+                }
+            }
+            
+            saveSetup() {
+                const setup = {
+                    modelPath: 'model.glb',
+                    colliders: []
+                };
+                
+                this.colliders.forEach((data, mesh) => {
+                    setup.colliders.push({
+                        type: data.type,
+                        position: mesh.position,
+                        rotation: mesh.rotation,
+                        scale: mesh.scaling,
+                        isWalkable: data.isWalkable || false
+                    });
+                });
+                
+                const json = JSON.stringify(setup, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'collision_setup.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+            
+            loadSetupData(setup) {
+                // Clear existing colliders
+                this.colliders.forEach((data, mesh) => {
+                    mesh.dispose();
+                });
+                this.colliders.clear();
+                
+                // Create colliders from setup
+                setup.colliders.forEach(data => {
+                    const position = new BABYLON.Vector3(data.position._x, data.position._y, data.position._z);
+                    this.currentTool = data.type;
+                    this.placeCollider(position);
+                    
+                    // Apply saved transform
+                    const meshes = Array.from(this.colliders.keys());
+                    const lastMesh = meshes[meshes.length - 1];
+                    if (lastMesh) {
+                        lastMesh.rotation = new BABYLON.Vector3(data.rotation._x, data.rotation._y, data.rotation._z);
+                        lastMesh.scaling = new BABYLON.Vector3(data.scale._x, data.scale._y, data.scale._z);
+                    }
+                });
+                
+                this.currentTool = 'select';
+            }
+            
+            createModelDropdown() {
+                const dropdownContainer = this.gui.getControlByName("dropdownContainer");
+                if (!dropdownContainer) return;
+                
+                // Create dropdown button
+                const dropdown = BABYLON.GUI.Button.CreateSimpleButton("modelDropdown", "Select Model...");
+                dropdown.width = "100%";
+                dropdown.height = "35px";
+                dropdown.color = "white";
+                dropdown.background = "#404040";
+                dropdown.thickness = 1;
+                dropdown.cornerRadius = 4;
+                dropdown.fontSize = 12;
+                dropdownContainer.addControl(dropdown);
+                
+                // Add hover effect
+                dropdown.onPointerEnterObservable.add(() => {
+                    dropdown.background = "#505050";
+                });
+                dropdown.onPointerOutObservable.add(() => {
+                    dropdown.background = "#404040";
+                });
+                
+                // Create dropdown list container (hidden by default)
+                const dropdownList = new BABYLON.GUI.ScrollViewer();
+                dropdownList.name = "modelDropdownList";
+                dropdownList.width = "250px";
+                dropdownList.height = "200px";
+                dropdownList.background = "#2c2c2c";
+                dropdownList.thickness = 1;
+                dropdownList.color = "#666";
+                dropdownList.isVisible = false;
+                dropdownList.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+                dropdownList.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                dropdownList.left = "15px";
+                dropdownList.top = "360px"; // Position below the dropdown button
+                dropdownList.barSize = 10;
+                dropdownList.barColor = "#505050";
+                dropdownList.barBackground = "#353535";
+                this.gui.addControl(dropdownList);
+                
+                const listStack = new BABYLON.GUI.StackPanel();
+                listStack.isVertical = true;
+                dropdownList.addControl(listStack);
+                
+                // Store reference for updating
+                this.modelListStack = listStack;
+                this.modelDropdown = dropdown;
+                this.modelDropdownList = dropdownList;
+                
+                // Toggle dropdown - prevent event bubbling
+                dropdown.onPointerClickObservable.add((eventData) => {
+                    eventData.skipOnPointerObservable = true;
+                    dropdownList.isVisible = !dropdownList.isVisible;
+                    if (dropdownList.isVisible) {
+                        this.refreshModelList();
+                        // Bring to front
+                        this.gui.moveToTop(dropdownList);
+                    }
+                });
+                
+                // Close dropdown when clicking elsewhere
+                let dropdownClickHandler = null;
+                dropdownClickHandler = this.scene.onPointerObservable.add((pointerInfo) => {
+                    if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN && dropdownList.isVisible) {
+                        // Check if click is outside dropdown
+                        const x = this.scene.pointerX;
+                        const y = this.scene.pointerY;
+                        const bounds = dropdownList.centerX ? {
+                            left: dropdownList.centerX - dropdownList.widthInPixels / 2,
+                            right: dropdownList.centerX + dropdownList.widthInPixels / 2,
+                            top: dropdownList.centerY - dropdownList.heightInPixels / 2,
+                            bottom: dropdownList.centerY + dropdownList.heightInPixels / 2
+                        } : null;
+                        
+                        // Hide if clicked outside
+                        if (!bounds || x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) {
+                            dropdownList.isVisible = false;
+                        }
+                    }
+                });
+            }
+            
+            refreshModelList() {
+                if (!this.modelListStack) return;
+                
+                // Clear existing items
+                this.modelListStack.children.forEach(child => child.dispose());
+                this.modelListStack.children = [];
+                
+                // Try to get models from registry or localStorage
+                let models = [];
+                
+                // Try localStorage first
+                const storedData = localStorage.getItem('sappyverse_model_registry');
+                if (storedData) {
+                    try {
+                        models = JSON.parse(storedData);
+                    } catch (e) {
+                        console.error('Failed to parse model registry:', e);
+                    }
+                }
+                
+                // Add header
+                const header = new BABYLON.GUI.TextBlock();
+                header.text = models.length + " models available";
+                header.height = "25px";
+                header.color = "#888";
+                header.fontSize = 11;
+                header.paddingTop = "5px";
+                header.paddingBottom = "5px";
+                header.paddingLeft = "10px";
+                header.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                this.modelListStack.addControl(header);
+                
+                // Add separator
+                const sep = new BABYLON.GUI.Rectangle();
+                sep.height = "1px";
+                sep.background = "#444";
+                sep.thickness = 0;
+                this.modelListStack.addControl(sep);
+                
+                // Add model items
+                models.forEach(model => {
+                    const item = BABYLON.GUI.Button.CreateSimpleButton(model.name, model.name);
+                    item.height = "35px";
+                    item.width = "100%";
+                    item.color = "white";
+                    item.background = "transparent";
+                    item.thickness = 0;
+                    item.fontSize = 12;
+                    item.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                    item.paddingLeft = "15px";
+                    
+                    // Hover effect
+                    item.onPointerEnterObservable.add(() => {
+                        item.background = "#404040";
+                    });
+                    item.onPointerOutObservable.add(() => {
+                        item.background = "transparent";
+                    });
+                    
+                    // Click to load
+                    item.onPointerClickObservable.add((eventData) => {
+                        eventData.skipOnPointerObservable = true;
+                        this.loadModelFromRegistry(model.name);
+                        this.modelDropdown.textBlock.text = model.name;
+                        this.modelDropdownList.isVisible = false;
+                    });
+                    
+                    this.modelListStack.addControl(item);
+                });
+                
+                if (models.length === 0) {
+                    const noModels = new BABYLON.GUI.TextBlock();
+                    noModels.text = "No models loaded in game";
+                    noModels.height = "30px";
+                    noModels.color = "#666";
+                    noModels.fontSize = 11;
+                    noModels.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+                    this.modelListStack.addControl(noModels);
+                }
+            }
+            
+            async loadModelFromRegistry(modelName) {
+                const registry = window.opener?.__modelRegistry || window.parent?.__modelRegistry || window.__modelRegistry;
+                let modelData = null;
+                
+                if (registry) {
+                    modelData = registry.getModel(modelName);
+                } else {
+                    // Try to get from localStorage
+                    const storedData = localStorage.getItem('sappyverse_model_registry');
+                    if (storedData) {
+                        try {
+                            const models = JSON.parse(storedData);
+                            const model = models.find(m => m.name === modelName);
+                            if (model) {
+                                // Create a simplified model object
+                                modelData = {
+                                    name: model.name,
+                                    path: model.path,
+                                    collisionSetupPath: model.hasCollisions ? `/src/babylon/data/${model.name}-collision.json` : undefined,
+                                    scale: model.scale ? new BABYLON.Vector3(model.scale.x, model.scale.y, model.scale.z) : new BABYLON.Vector3(1, 1, 1)
+                                };
+                            }
+                        } catch (e) {
+                            console.error('Failed to parse model registry from localStorage:', e);
+                        }
+                    }
+                }
+                
+                if (!modelData) {
+                    alert('Model not found');
+                    return;
+                }
+                
+                // Clear existing
+                if (this.loadedModel) {
+                    this.loadedModel.dispose();
+                }
+                this.colliders.forEach((data, mesh) => {
+                    mesh.dispose();
+                });
+                this.colliders.clear();
+                
+                // Load the model
+                try {
+                    const result = await BABYLON.SceneLoader.LoadAssetContainerAsync(
+                        modelData.path.substring(0, modelData.path.lastIndexOf('/') + 1),
+                        modelData.path.substring(modelData.path.lastIndexOf('/') + 1),
+                        this.scene
+                    );
+                    
+                    result.addAllToScene();
+                    this.loadedModel = result.instantiateModelsToScene().rootNodes[0];
+                    
+                    // Center the model and lock it
+                    if (this.loadedModel) {
+                        this.loadedModel.position = new BABYLON.Vector3(0, 0, 0);
+                        this.loadedModel.rotation = new BABYLON.Vector3(0, 0, 0);
+                        this.loadedModel.scaling = modelData.scale ? modelData.scale.clone() : new BABYLON.Vector3(1, 1, 1);
+                        
+                        // Make model non-pickable so it can't be selected/moved
+                        this.loadedModel.getChildMeshes().forEach(mesh => {
+                            mesh.isPickable = false;
+                        });
+                        
+                        // Store model info for saving
+                        this.currentModelName = modelData.name;
+                        this.currentModelPath = modelData.path;
+                    }
+                    
+                    // Load collision setup if exists
+                    if (modelData.collisionSetupPath) {
+                        try {
+                            const response = await fetch(modelData.collisionSetupPath);
+                            const setup = await response.json();
+                            this.loadSetupData(setup);
+                        } catch (err) {
+                            console.log('No collision setup found, starting fresh');
+                        }
+                    }
+                    
+                    // Center camera on model
+                    this.camera.setTarget(BABYLON.Vector3.Zero());
+                    
+                } catch (error) {
+                    alert(`Failed to load model: ${error}`);
+                }
+            }
+            
+            
+            // Save/Load methods
+            saveCollisionSetup() {
+                if (!this.loadedModel) {
+                    alert('Please load a model first');
+                    return;
+                }
+                
+                const setup = {
+                    modelPath: this.currentModelPath || 'model.glb',
+                    colliders: []
+                };
+                
+                this.colliders.forEach((data, mesh) => {
+                    setup.colliders.push({
+                        type: data.type,
+                        position: mesh.position,
+                        rotation: mesh.rotation,
+                        scale: mesh.scaling,
+                        isWalkable: data.isWalkable || false,
+                        height: data.height || mesh.position.y
+                    });
+                });
+                
+                const json = JSON.stringify(setup, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = (this.currentModelName || 'model') + '-collision.json';
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                // Also update collider count
+                this.updateColliderCount();
+            }
+            
+            exportBackup() {
+                const backup = {
+                    version: '1.0',
+                    timestamp: new Date().toISOString(),
+                    modelName: this.currentModelName,
+                    modelPath: this.currentModelPath,
+                    colliders: []
+                };
+                
+                this.colliders.forEach((data, mesh) => {
+                    backup.colliders.push({
+                        type: data.type,
+                        position: mesh.position,
+                        rotation: mesh.rotation,
+                        scale: mesh.scaling,
+                        isWalkable: data.isWalkable || false,
+                        name: mesh.name
+                    });
+                });
+                
+                const json = JSON.stringify(backup, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `collision-backup-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+        }
+        
+        // Initialize editor
+        const canvas = document.getElementById('renderCanvas');
+        const editor = new CollisionEditor(canvas);
+    </script>
+</body>
+</html>

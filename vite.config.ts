@@ -9,7 +9,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    assetsDir: 'assets'
+    assetsDir: 'assets',
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        collisionEditor: path.resolve(__dirname, 'collision-editor-new.html')
+      }
+    }
   },
   server: {
     port: 3000,

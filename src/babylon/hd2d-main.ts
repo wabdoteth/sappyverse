@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <button id="toggleDithering" style="display: block; margin: 5px 0; width: 100%;">Disable Dithering</button>
             <hr style="margin: 10px 0;">
             <button id="toggleInspector" style="display: block; margin: 5px 0; width: 100%; background: #4CAF50; color: white;">Open Babylon Inspector</button>
+            <button id="openCollisionEditor" style="display: block; margin: 5px 0; width: 100%; background: #9C27B0; color: white;">Open Collision Editor</button>
             <hr style="margin: 10px 0;">
             <div style="margin: 10px 0;">
                 <strong>Time of Day</strong>
@@ -138,6 +139,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     embedMode: true
                 });
             }
+        });
+        
+        // Collision Editor toggle
+        document.getElementById('openCollisionEditor')?.addEventListener('click', () => {
+            // Open collision editor in a new tab
+            window.open('/collision-editor-new.html', '_blank');
         });
         
         // Time controls

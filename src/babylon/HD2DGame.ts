@@ -47,6 +47,13 @@ import { ChromaticAberrationPostProcess } from '@babylonjs/core/PostProcesses/ch
 import '@babylonjs/core/Rendering/depthRendererSceneComponent';
 import { TiltShiftPostProcess } from './postprocess/TiltShiftPostProcess';
 import { RetroPostProcess } from './postprocess/RetroPostProcess';
+import { ModelRegistry } from './systems/ModelRegistry';
+
+// Physics
+import { HavokPlugin } from '@babylonjs/core/Physics/v2/Plugins/havokPlugin';
+import { PhysicsAggregate } from '@babylonjs/core/Physics/v2/physicsAggregate';
+import { PhysicsShapeType } from '@babylonjs/core/Physics/v2/IPhysicsEnginePlugin';
+import HavokPhysics from '@babylonjs/havok';
 
 // GUI
 import { AdvancedDynamicTexture } from '@babylonjs/gui/2D/advancedDynamicTexture';
@@ -117,10 +124,16 @@ export class HD2DGame {
     private ambientLight: HemisphericLight;
     private shadowGenerator: ShadowGenerator;
     
+    // Physics
+    private havokPlugin: HavokPlugin | null = null;
+    private physicsEnabled: boolean = false;
+    
     // Game objects
     private townScene: HD2DTownScene;
     private player: HD2DAnimatedSprite;
     private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
+    private collisionCylinders: Array<{center: Vector3, radius: number, height: number}> = [];
+    private floorZones: Array<{bounds: {min: Vector3, max: Vector3}, heightMap: number[][], resolution: number}> = [];
     private playerCollisionMesh: Mesh | null = null; // Persistent collision mesh for player
     
     // Input
@@ -164,6 +177,9 @@ export class HD2DGame {
         
         // Create scene
         this.scene = new Scene(this.engine);
+        
+        // Initialize model registry early so it's available globally
+        ModelRegistry.getInstance();
         
         // Initialize HD-2D pipeline
         this.initializeHD2D().then(() => {
@@ -315,11 +331,17 @@ export class HD2DGame {
         this.townScene = new HD2DTownScene(this.scene);
         await this.townScene.build();
         
+        // Force sync model registry to localStorage after scene is built
+        const registry = ModelRegistry.getInstance();
+        registry.syncToStorage();
+        
         // Get player reference
         this.player = this.townScene.getPlayer();
         
-        // Get collision boxes
+        // Get collision boxes, cylinders, and floor zones
         this.collisionBoxes = this.townScene.getCollisionBoxes();
+        this.collisionCylinders = this.townScene.getCollisionCylinders();
+        this.floorZones = this.townScene.getFloorZones();
         
         // Create player collision mesh (invisible cylinder for player bounds)
         if (this.player) {
@@ -632,11 +654,19 @@ export class HD2DGame {
             
             if (finalMovement.x !== 0 || finalMovement.z !== 0) {
                 const newPosition = this.player.position.add(finalMovement);
-                this.player.setPosition(newPosition);
+                
+                // Check if player height should be adjusted based on ground/objects
+                const adjustedPosition = this.checkGroundHeight(newPosition);
+                
+                this.player.setPosition(adjustedPosition);
                 
                 // Update camera target only if not in rotation mode
                 if (!this.isRotatingCamera) {
-                    this.mainCamera.target = this.player.position;
+                    // Update camera to follow player's position including Y changes
+                    this.mainCamera.target = this.player.position.clone();
+                    // Optionally adjust camera height to follow player
+                    const cameraHeight = 15 + (this.player.position.y - 0.6) * 0.5; // Partial follow
+                    this.mainCamera.position.y = cameraHeight;
                 }
                 
                 // Update sprite direction based on actual movement
@@ -650,6 +680,13 @@ export class HD2DGame {
             }
         } else {
             this.player.setMoving(false);
+            
+            // Even when not moving, check if player should maintain height
+            const currentPos = this.player.position;
+            const adjustedPosition = this.checkGroundHeight(currentPos);
+            if (Math.abs(adjustedPosition.y - currentPos.y) > 0.01) {
+                this.player.setPosition(adjustedPosition);
+            }
         }
     }
     
@@ -692,11 +729,34 @@ export class HD2DGame {
             }
         }
         
+        // Check cylinder collisions (for round objects like barrels)
+        // REMOVED SIDE COLLISION FOR NOW - only using height adjustment
+        /*
+        for (const cylinder of this.collisionCylinders) {
+            // 2D distance check (ignoring Y for now)
+            const dx = position.x - cylinder.center.x;
+            const dz = position.z - cylinder.center.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            // Check if player circle overlaps with cylinder
+            if (distance < (halfWidth + cylinder.radius)) {
+                // Check if player is above the cylinder (trying to walk on top)
+                // Barrel height is stored in cylinder.height
+                if (position.y > cylinder.height * 0.8) {
+                    // Player is high enough to be on top, allow movement
+                    continue;
+                }
+                return true; // Collision detected (side collision)
+            }
+        }
+        */
+        
         // Check mesh collisions using precise mesh intersection
         if (this.playerCollisionMesh) {
             // Update player collision mesh position to test position
             this.playerCollisionMesh.position.copyFrom(position);
-            this.playerCollisionMesh.position.y = position.y + 0.9; // Center of player
+            // Use a fixed offset from the player's actual Y position for consistency
+            this.playerCollisionMesh.position.y = position.y; // Keep collision at same Y as player
             this.playerCollisionMesh.computeWorldMatrix(true);
             
             // Check against all meshes with collision enabled
@@ -725,7 +785,7 @@ export class HD2DGame {
                     // Now do precise mesh intersection
                     // The 'true' parameter enables precise intersection testing
                     if (this.playerCollisionMesh.intersectsMesh(mesh, true)) {
-                        console.log(`Mesh intersection detected with: ${mesh.name}`);
+                        
                         return true; // Collision detected
                     }
                 }
@@ -733,6 +793,94 @@ export class HD2DGame {
         }
         
         return false;
+    }
+    
+    private checkGroundHeight(position: Vector3): Vector3 {
+        // Player collision width
+        const spriteWidth = 3;
+        const playerCollisionWidth = (22 / 96) * spriteWidth;
+        const halfWidth = playerCollisionWidth / 2;
+        const defaultHeight = 0.6; // Default player Y when on ground
+        
+        let targetHeight = defaultHeight;
+        let foundElevation = false;
+        
+        // First check floor zones (walkable elevated/sloped areas)
+        for (const zone of this.floorZones) {
+            // Check if player is within this floor zone
+            if (position.x >= zone.bounds.min.x && position.x <= zone.bounds.max.x &&
+                position.z >= zone.bounds.min.z && position.z <= zone.bounds.max.z) {
+                
+                // Get height from height map
+                const cellWidth = (zone.bounds.max.x - zone.bounds.min.x) / zone.resolution;
+                const cellDepth = (zone.bounds.max.z - zone.bounds.min.z) / zone.resolution;
+                
+                const gridX = Math.floor((position.x - zone.bounds.min.x) / cellWidth);
+                const gridZ = Math.floor((position.z - zone.bounds.min.z) / cellDepth);
+                
+                if (gridX >= 0 && gridX <= zone.resolution && gridZ >= 0 && gridZ <= zone.resolution) {
+                    // Clamp to array bounds
+                    const clampedX = Math.min(gridX, zone.resolution);
+                    const clampedZ = Math.min(gridZ, zone.resolution);
+                    const floorHeight = zone.heightMap[clampedZ][clampedX]; // Fixed: [z][x] not [x][z]
+                    targetHeight = floorHeight + defaultHeight; // Add player offset
+                    foundElevation = true;
+                    break;
+                }
+            }
+        }
+        
+        // Then check cylinders (objects player can stand on)
+        if (!foundElevation) {
+            for (const cylinder of this.collisionCylinders) {
+                // 2D distance check
+                const dx = position.x - cylinder.center.x;
+                const dz = position.z - cylinder.center.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                // Check if player is within the cylinder's radius (can stand on top)
+                if (distance < cylinder.radius) {
+                    // Player is on top of the cylinder
+                    targetHeight = defaultHeight + cylinder.height;
+                    foundElevation = true;
+                    break;
+                }
+                // Check if player is on the edge (partially on cylinder)
+                else if (distance < (halfWidth + cylinder.radius)) {
+                    // Calculate how much the player overlaps with the cylinder
+                    const overlap = (halfWidth + cylinder.radius) - distance;
+                    const overlapRatio = overlap / halfWidth;
+                    
+                    // If significant overlap, lift player proportionally
+                    if (overlapRatio > 0.3) {
+                        const cylinderHeight = defaultHeight + cylinder.height;
+                        // Smooth transition from current height to cylinder height
+                        targetHeight = defaultHeight + (cylinderHeight - defaultHeight) * overlapRatio;
+                        foundElevation = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Smoothly adjust to target height
+        const newPosition = position.clone();
+        const heightDiff = targetHeight - position.y;
+        
+        if (Math.abs(heightDiff) > 0.01) {
+            // Smooth transition
+            if (heightDiff > 0) {
+                // Going up - faster
+                newPosition.y = position.y + Math.min(heightDiff, 0.3);
+            } else {
+                // Going down - slower
+                newPosition.y = position.y + Math.max(heightDiff, -0.2);
+            }
+        } else {
+            newPosition.y = targetHeight;
+        }
+        
+        return newPosition;
     }
     
     private setupPostProcessing(): void {
@@ -831,7 +979,6 @@ export class HD2DGame {
                         mat.transparencyMode = 1; // ALPHATEST mode
                         mat.alphaMode = 1; // ALPHA_COMBINE
                     }
-                    console.log(`Added sprite shadow caster: ${mesh.name} with alpha testing`);
                 }
             }
             
@@ -845,7 +992,6 @@ export class HD2DGame {
         this.sunLight.direction = new Vector3(-0.3, -1, 0.3).normalize();
         this.sunLight.intensity = 1.2;
         
-        console.log('HD-2D shadows enabled');
     }
     
     public toggleShadows(enabled: boolean): void {
@@ -929,7 +1075,7 @@ export class HD2DGame {
     public toggleCollisionDebug(visible: boolean): void {
         // Toggle visibility of all collision debug meshes (green wireframes)
         this.scene.meshes.forEach(mesh => {
-            if (mesh.name.includes('_collider')) {
+            if (mesh.name.includes('debugCollider') || mesh.name.includes('debugFloor')) {
                 mesh.setEnabled(visible);
             }
         });
@@ -1336,6 +1482,30 @@ export class HD2DGame {
             this.debugMeshes.push(debugBox);
         });
         
+        // Create debug cylinders for cylinder collisions
+        this.collisionCylinders.forEach((cylinder, index) => {
+            const debugCylinder = CreateCylinder(`debugCylinder${index}`, {
+                diameter: cylinder.radius * 2,
+                height: cylinder.height, // Use actual cylinder height
+                tessellation: 16
+            }, this.scene);
+            
+            debugCylinder.position = new Vector3(
+                cylinder.center.x,
+                cylinder.height / 2, // Position at half height so bottom sits on ground
+                cylinder.center.z
+            );
+            
+            const debugMat = new StandardMaterial(`debugCylinderMat${index}`, this.scene);
+            debugMat.diffuseColor = new Color3(1, 1, 0); // Yellow for cylinders
+            debugMat.alpha = 0.3;
+            debugMat.emissiveColor = new Color3(1, 1, 0);
+            debugCylinder.material = debugMat;
+            debugCylinder.renderingGroupId = 3; // Above everything else
+            
+            this.debugMeshes.push(debugCylinder);
+        });
+        
         // Create player collision line
         const spriteWidth = 3;
         const playerCollisionWidth = (22 / 96) * spriteWidth;
@@ -1357,8 +1527,42 @@ export class HD2DGame {
     private updateDebugVisuals(): void {
         if (this.playerDebugLine && this.player) {
             this.playerDebugLine.position.x = this.player.position.x;
-            this.playerDebugLine.position.y = 0.05;
             this.playerDebugLine.position.z = this.player.position.z;
+            
+            // Determine the ground height at player's position
+            let groundHeight = 0;
+            
+            // Check if player is on a cylinder
+            const spriteWidth = 3;
+            const playerCollisionWidth = (22 / 96) * spriteWidth;
+            const halfWidth = playerCollisionWidth / 2;
+            
+            for (const cylinder of this.collisionCylinders) {
+                const dx = this.player.position.x - cylinder.center.x;
+                const dz = this.player.position.z - cylinder.center.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                if (distance < cylinder.radius) {
+                    groundHeight = cylinder.height;
+                    break;
+                } else if (distance < (halfWidth + cylinder.radius)) {
+                    // On edge - calculate interpolated height
+                    const overlap = (halfWidth + cylinder.radius) - distance;
+                    const overlapRatio = overlap / halfWidth;
+                    if (overlapRatio > 0.3) {
+                        groundHeight = cylinder.height * overlapRatio;
+                        break;
+                    }
+                }
+            }
+            
+            // Position debug line at the ground level beneath the player
+            this.playerDebugLine.position.y = groundHeight + 0.05;
+        }
+        
+        // Also update the player collision mesh position to stay in sync
+        if (this.playerCollisionMesh && this.player) {
+            this.playerCollisionMesh.position.copyFrom(this.player.position);
         }
     }
 }

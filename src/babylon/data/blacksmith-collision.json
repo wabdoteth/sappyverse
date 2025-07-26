@@ -1,0 +1,65 @@
+{
+  "modelPath": "/assets/models/blacksmith.glb",
+  "modelScale": { "_x": 5, "_y": 5, "_z": 5 },
+  "modelPosition": { "_x": -10, "_y": 0, "_z": 10 },
+  "modelRotation": { "_x": 0, "_y": 0, "_z": 0 },
+  "colliders": [
+    {
+      "type": "box",
+      "name": "front_wall_left",
+      "position": { "_x": -12.5, "_y": 2, "_z": 7.5 },
+      "rotation": { "_x": 0, "_y": 0, "_z": 0 },
+      "scale": { "_x": 3, "_y": 4, "_z": 0.5 },
+      "isWalkable": false
+    },
+    {
+      "type": "box",
+      "name": "front_wall_right",
+      "position": { "_x": -7.5, "_y": 2, "_z": 7.5 },
+      "rotation": { "_x": 0, "_y": 0, "_z": 0 },
+      "scale": { "_x": 3, "_y": 4, "_z": 0.5 },
+      "isWalkable": false
+    },
+    {
+      "type": "box",
+      "name": "back_wall",
+      "position": { "_x": -10, "_y": 2, "_z": 12.5 },
+      "rotation": { "_x": 0, "_y": 0, "_z": 0 },
+      "scale": { "_x": 8, "_y": 4, "_z": 0.5 },
+      "isWalkable": false
+    },
+    {
+      "type": "box",
+      "name": "left_wall",
+      "position": { "_x": -14, "_y": 2, "_z": 10 },
+      "rotation": { "_x": 0, "_y": 0, "_z": 0 },
+      "scale": { "_x": 0.5, "_y": 4, "_z": 5 },
+      "isWalkable": false
+    },
+    {
+      "type": "box",
+      "name": "right_wall",
+      "position": { "_x": -6, "_y": 2, "_z": 10 },
+      "rotation": { "_x": 0, "_y": 0, "_z": 0 },
+      "scale": { "_x": 0.5, "_y": 4, "_z": 5 },
+      "isWalkable": false
+    },
+    {
+      "type": "floor",
+      "name": "elevated_floor",
+      "position": { "_x": -10, "_y": 1.5, "_z": 10 },
+      "rotation": { "_x": 0, "_y": 0, "_z": 0 },
+      "scale": { "_x": 6, "_y": 0.2, "_z": 4 },
+      "isWalkable": true,
+      "height": 1.5
+    },
+    {
+      "type": "ramp",
+      "name": "entrance_ramp",
+      "position": { "_x": -10, "_y": 0.75, "_z": 7 },
+      "rotation": { "_x": -0.3, "_y": 0, "_z": 0 },
+      "scale": { "_x": 2, "_y": 0.2, "_z": 2 },
+      "isWalkable": true
+    }
+  ]
+}

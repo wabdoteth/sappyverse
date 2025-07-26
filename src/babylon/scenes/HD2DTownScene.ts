@@ -23,12 +23,16 @@ import { HD2DSprite } from '../HD2DSprite';
 import { AnimatedWaterMaterial } from '../materials/AnimatedWaterMaterial';
 import { FountainWaterFlow } from '../effects/FountainWaterFlow';
 import { ModelLoader, Props3D } from '../loaders/ModelLoader';
+import { MeshColliderDecomposer } from '../utils/MeshColliderDecomposer';
+import { ModelRegistry } from '../systems/ModelRegistry';
 
 export class HD2DTownScene {
     private scene: Scene;
     private player: HD2DAnimatedSprite;
     private npcs: HD2DSprite[] = [];
     private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
+    private collisionCylinders: Array<{center: Vector3, radius: number, height: number}> = [];
+    private floorZones: Array<{bounds: {min: Vector3, max: Vector3}, heightMap: number[][], resolution: number}> = [];
     private fountainWaterFlow: FountainWaterFlow;
     
     constructor(scene: Scene) {
@@ -203,7 +207,6 @@ export class HD2DTownScene {
     
     private async loadBlacksmith(): Promise<void> {
         try {
-            console.log('Loading blacksmith model...');
             
             // Position where the blacksmith was before
             const blacksmithPosition = new Vector3(-10, 0, 10);
@@ -218,7 +221,6 @@ export class HD2DTownScene {
             // Instantiate the loaded meshes
             const blacksmithMeshes = result.instantiateModelsToScene();
             
-            console.log(`Loaded ${blacksmithMeshes.rootNodes.length} root nodes for blacksmith`);
             
             // Find the main mesh with geometry
             let blacksmithMesh: Mesh | null = null;
@@ -245,7 +247,6 @@ export class HD2DTownScene {
                 return;
             }
             
-            console.log(`Found blacksmith mesh: ${blacksmithMesh.name} with ${blacksmithMesh.getTotalVertices()} vertices`);
             
             // Get the root node to apply transformations
             const rootNode = blacksmithMeshes.rootNodes[0];
@@ -263,7 +264,13 @@ export class HD2DTownScene {
                     rootNode.position.y = -minY;
                 }
                 
-                console.log(`Blacksmith positioned at: ${rootNode.position}`);
+                // Register model in global registry
+                ModelRegistry.getInstance().registerModel(
+                    'blacksmith',
+                    '/assets/models/blacksmith.glb',
+                    rootNode,
+                    '/src/babylon/data/blacksmith-collision.json'
+                );
             }
             
             // Set rendering properties
@@ -279,51 +286,270 @@ export class HD2DTownScene {
             
             // Create mesh collider for the blacksmith
             if (blacksmithMesh) {
-                this.createBlacksmithMeshCollider(blacksmithMesh);
+                await this.createBlacksmithMeshCollider(blacksmithMesh);
             }
             
-            // Add simple collision box
-            const size = 8; // Approximate size
-            this.collisionBoxes.push({
-                min: new Vector3(blacksmithPosition.x - size/2, 0, blacksmithPosition.z - size/2),
-                max: new Vector3(blacksmithPosition.x + size/2, 10, blacksmithPosition.z + size/2)
-            });
+            // Store blacksmith mesh for collision detection
+            (this as any).blacksmithMesh = blacksmithMesh;
             
-            console.log('Blacksmith loaded successfully');
             
         } catch (error) {
             console.error('Failed to load blacksmith:', error);
         }
     }
     
-    private createBlacksmithMeshCollider(blacksmithMesh: Mesh): void {
-        console.log('Creating mesh collider for blacksmith...');
+    private async createBlacksmithMeshCollider(blacksmithMesh: Mesh): Promise<void> {
+        // Don't enable mesh collision - we'll use primitives instead
+        blacksmithMesh.checkCollisions = false;
         
-        // Enable collision on the mesh itself
-        blacksmithMesh.checkCollisions = true;
+        try {
+            let setup = null;
+            
+            // First check localStorage for collision data
+            const localData = localStorage.getItem('sappyverse_collision_blacksmith');
+            if (localData) {
+                setup = JSON.parse(localData);
+                console.log('Loaded blacksmith collision from localStorage');
+            } else {
+                // Fallback to loading collision setup from JSON file
+                const response = await fetch('/src/babylon/data/blacksmith-collision.json');
+                setup = await response.json();
+            }
+            
+            console.log('Loading blacksmith collision setup...');
+            
+            // Apply colliders from setup
+            setup.colliders.forEach(colliderData => {
+                if (colliderData.type === 'box') {
+                    // Create box collider
+                    this.collisionBoxes.push({
+                        min: new Vector3(
+                            colliderData.position._x - colliderData.scale._x / 2,
+                            colliderData.position._y - colliderData.scale._y / 2,
+                            colliderData.position._z - colliderData.scale._z / 2
+                        ),
+                        max: new Vector3(
+                            colliderData.position._x + colliderData.scale._x / 2,
+                            colliderData.position._y + colliderData.scale._y / 2,
+                            colliderData.position._z + colliderData.scale._z / 2
+                        )
+                    });
+                    
+                    // Debug visualization
+                    this.createDebugBox(
+                        new Vector3(colliderData.position._x, colliderData.position._y, colliderData.position._z),
+                        new Vector3(colliderData.scale._x, colliderData.scale._y, colliderData.scale._z),
+                        new Color3(1, 0, 0)
+                    );
+                    
+                } else if (colliderData.type === 'cylinder') {
+                    // Create cylinder collider
+                    this.collisionCylinders.push({
+                        center: new Vector3(colliderData.position._x, colliderData.position._y, colliderData.position._z),
+                        radius: colliderData.scale._x / 2,
+                        height: colliderData.scale._y
+                    });
+                    
+                    // Debug visualization
+                    this.createDebugCylinder(
+                        new Vector3(colliderData.position._x, colliderData.position._y, colliderData.position._z),
+                        colliderData.scale._x / 2,
+                        colliderData.scale._y,
+                        new Color3(0, 1, 0)
+                    );
+                    
+                } else if (colliderData.type === 'floor' || colliderData.type === 'ramp') {
+                    // Create floor zone
+                    let heightMap;
+                    let resolution = 1;
+                    
+                    if (colliderData.type === 'ramp') {
+                        // For ramps, create a height map that interpolates along the ramp
+                        resolution = 10; // Higher resolution for smooth ramp
+                        heightMap = [];
+                        
+                        // Calculate ramp direction based on rotation
+                        const rotY = colliderData.rotation ? colliderData.rotation._y : 0;
+                        const rotX = colliderData.rotation ? colliderData.rotation._x : 0;
+                        const rotZ = colliderData.rotation ? colliderData.rotation._z : 0;
+                        
+                        // Create height map grid
+                        for (let z = 0; z <= resolution; z++) {
+                            heightMap[z] = [];
+                            for (let x = 0; x <= resolution; x++) {
+                                // Calculate position within the ramp (0 to 1)
+                                const u = x / resolution;
+                                const v = z / resolution;
+                                
+                                // Calculate height based on rotation
+                                // Default ramp goes up along Z axis
+                                let height = colliderData.position._y;
+                                
+                                if (Math.abs(rotX) > 0.01) {
+                                    // Ramp tilted on X axis (front/back)
+                                    const t = v - 0.5; // -0.5 to 0.5
+                                    height += Math.tan(-rotX) * colliderData.scale._z * t; // Inverted rotation
+                                }
+                                
+                                if (Math.abs(rotZ) > 0.01) {
+                                    // Ramp tilted on Z axis (left/right)
+                                    const t = u - 0.5; // -0.5 to 0.5
+                                    height += Math.tan(-rotZ) * colliderData.scale._x * t; // Inverted rotation
+                                }
+                                
+                                heightMap[z][x] = height;
+                            }
+                        }
+                    } else {
+                        // For floors, use single height
+                        heightMap = [[colliderData.height || colliderData.position._y]];
+                    }
+                    
+                    const floorZone = {
+                        bounds: {
+                            min: new Vector3(
+                                colliderData.position._x - colliderData.scale._x / 2,
+                                colliderData.position._y - colliderData.scale._y / 2,
+                                colliderData.position._z - colliderData.scale._z / 2
+                            ),
+                            max: new Vector3(
+                                colliderData.position._x + colliderData.scale._x / 2,
+                                colliderData.position._y + colliderData.scale._y / 2,
+                                colliderData.position._z + colliderData.scale._z / 2
+                            )
+                        },
+                        heightMap: heightMap,
+                        resolution: resolution,
+                        type: colliderData.type, // Store type for collision handling
+                        rotation: colliderData.rotation // Store rotation for collision calculations
+                    };
+                    
+                    this.floorZones.push(floorZone);
+                    
+                    // Debug visualization
+                    this.createDebugFloorZone(
+                        floorZone,
+                        colliderData.type === 'floor' ? new Color3(0, 0, 1) : new Color3(1, 0, 1),
+                        colliderData
+                    );
+                }
+            });
+            
+            console.log(`Loaded ${setup.colliders.length} colliders for blacksmith`);
+            
+        } catch (error) {
+            console.error('Failed to load collision setup, using fallback:', error);
+            
+            // Fallback to simple bounding box
+            const bounds = blacksmithMesh.getBoundingInfo().boundingBox;
+            this.collisionBoxes.push({
+                min: bounds.minimumWorld.clone(),
+                max: bounds.maximumWorld.clone()
+            });
+        }
+    }
+    
+    private createDebugBox(position: Vector3, size: Vector3, color: Color3): void {
+        const debugBox = CreateBox('debugColliderBox', {
+            width: size.x,
+            height: size.y,
+            depth: size.z
+        }, this.scene);
         
-        // Create a visual representation of the mesh collider
-        const colliderMesh = blacksmithMesh.clone(`${blacksmithMesh.name}_collider`);
+        debugBox.position = position;
         
-        // Update world matrix to ensure correct positioning
-        colliderMesh.computeWorldMatrix(true);
+        const debugMat = new StandardMaterial('debugBoxMat', this.scene);
+        debugMat.wireframe = true;
+        debugMat.emissiveColor = color;
+        debugMat.disableLighting = true;
+        debugMat.alpha = 0.5;
         
-        // Create wireframe material for visualization
-        const colliderMat = new StandardMaterial(`${blacksmithMesh.name}_colliderMat`, this.scene);
-        colliderMat.wireframe = true;
-        colliderMat.emissiveColor = new Color3(0, 1, 0); // Green wireframe
-        colliderMat.disableLighting = true;
-        colliderMat.alpha = 0.5; // Semi-transparent
+        debugBox.material = debugMat;
+        debugBox.isPickable = false;
+        debugBox.renderingGroupId = 2;
+    }
+    
+    private createDebugCylinder(position: Vector3, radius: number, height: number, color: Color3): void {
+        const debugCylinder = CreateCylinder('debugColliderCylinder', {
+            diameter: radius * 2,
+            height: height,
+            tessellation: 16
+        }, this.scene);
         
-        colliderMesh.material = colliderMat;
-        colliderMesh.isPickable = false;
-        colliderMesh.renderingGroupId = 2; // Render on top
+        debugCylinder.position = position;
         
-        console.log('Mesh collider created for blacksmith:', {
-            meshName: blacksmithMesh.name,
-            vertices: blacksmithMesh.getTotalVertices(),
-            collisionEnabled: blacksmithMesh.checkCollisions
-        });
+        const debugMat = new StandardMaterial('debugCylinderMat', this.scene);
+        debugMat.wireframe = true;
+        debugMat.emissiveColor = color;
+        debugMat.disableLighting = true;
+        debugMat.alpha = 0.5;
+        
+        debugCylinder.material = debugMat;
+        debugCylinder.isPickable = false;
+        debugCylinder.renderingGroupId = 2;
+    }
+    
+    private createDebugFloorZone(zone: any, color: Color3, colliderData?: any): void {
+        // For ramps, create an angled box to show the slope
+        if (colliderData && colliderData.type === 'ramp') {
+            const rampBox = CreateBox('debugRamp', {
+                width: colliderData.scale._x,
+                height: colliderData.scale._y,
+                depth: colliderData.scale._z
+            }, this.scene);
+            
+            // Use zone center position which already has the offset applied
+            rampBox.position = new Vector3(
+                (zone.bounds.min.x + zone.bounds.max.x) / 2,
+                (zone.bounds.min.y + zone.bounds.max.y) / 2,
+                (zone.bounds.min.z + zone.bounds.max.z) / 2
+            );
+            
+            // Apply rotation if specified
+            if (colliderData.rotation) {
+                rampBox.rotation = new Vector3(
+                    colliderData.rotation._x,
+                    colliderData.rotation._y,
+                    colliderData.rotation._z
+                );
+            }
+            
+            const debugMat = new StandardMaterial('debugRampMat', this.scene);
+            debugMat.wireframe = true;
+            debugMat.emissiveColor = color;
+            debugMat.disableLighting = true;
+            debugMat.alpha = 0.5;
+            
+            rampBox.material = debugMat;
+            rampBox.isPickable = false;
+            rampBox.renderingGroupId = 2;
+        } else {
+            // For floors, create a flat plane as before
+            const width = zone.bounds.max.x - zone.bounds.min.x;
+            const depth = zone.bounds.max.z - zone.bounds.min.z;
+            
+            const debugFloor = CreateGround('debugFloorZone', {
+                width: width,
+                height: depth,
+                subdivisions: zone.resolution
+            }, this.scene);
+            
+            debugFloor.position = new Vector3(
+                (zone.bounds.min.x + zone.bounds.max.x) / 2,
+                (zone.bounds.min.y + zone.bounds.max.y) / 2,
+                (zone.bounds.min.z + zone.bounds.max.z) / 2
+            );
+            
+            const debugMat = new StandardMaterial('debugFloorMat', this.scene);
+            debugMat.wireframe = true;
+            debugMat.emissiveColor = color;
+            debugMat.disableLighting = true;
+            debugMat.alpha = 0.5;
+            
+            debugFloor.material = debugMat;
+            debugFloor.isPickable = false;
+            debugFloor.renderingGroupId = 2;
+        }
     }
     
     private createTrees(): void {
@@ -603,46 +829,168 @@ export class HD2DTownScene {
     }
     
     private async create3DProps(): Promise<void> {
-        // Load a barrel next to the fountain
-        await this.loadBarrel();
+        // Load barrels at different locations
+        await this.loadBarrel(new Vector3(2.5, 0, 0));  // Next to fountain
+        await this.loadBarrel(new Vector3(-12, 0, 8));   // Next to blacksmith, farther right
     }
     
-    private createBarrelMeshCollider(barrelMesh: Mesh): void {
-        console.log('Creating mesh collider for barrel...');
+    private async createBarrelMeshCollider(barrelMesh: Mesh, position: Vector3): Promise<void> {
         
-        // Enable collision on the mesh itself
-        barrelMesh.checkCollisions = true;
+        // Don't enable mesh collision, use cylinder collision instead
+        barrelMesh.checkCollisions = false;
         
-        // Create a visual representation of the mesh collider
-        const colliderMesh = barrelMesh.clone(`${barrelMesh.name}_collider`);
-        
-        // Update world matrix to ensure correct positioning
-        colliderMesh.computeWorldMatrix(true);
-        
-        // Create wireframe material for visualization
-        const colliderMat = new StandardMaterial(`${barrelMesh.name}_colliderMat`, this.scene);
-        colliderMat.wireframe = true;
-        colliderMat.emissiveColor = new Color3(0, 1, 0); // Green wireframe
-        colliderMat.disableLighting = true;
-        colliderMat.alpha = 0.5; // Semi-transparent
-        
-        colliderMesh.material = colliderMat;
-        colliderMesh.isPickable = false;
-        colliderMesh.renderingGroupId = 2; // Render on top
-        
-        // The cloned mesh with wireframe acts as visual representation
-        // The original mesh has checkCollisions enabled for actual collision detection
-        
-        console.log('Mesh collider created:', {
-            meshName: barrelMesh.name,
-            vertices: barrelMesh.getTotalVertices(),
-            collisionEnabled: barrelMesh.checkCollisions
-        });
-    }
-    
-    private async loadBarrel(): Promise<void> {
         try {
-            console.log('Loading barrel model...');
+            let setup = null;
+            
+            // Only check localStorage for collision data - no file fallback
+            const localData = localStorage.getItem('sappyverse_collision_barrel');
+            if (localData) {
+                setup = JSON.parse(localData);
+                console.log('Loaded barrel collision from localStorage');
+            } else {
+                console.log('No barrel collision data in localStorage');
+            }
+            
+            if (setup && setup.colliders) {
+                // Apply colliders from setup with position offset
+                setup.colliders.forEach(colliderData => {
+                    // Apply position offset to all collider positions
+                    const colliderPos = new Vector3(
+                        position.x + colliderData.position._x,
+                        position.y + colliderData.position._y,
+                        position.z + colliderData.position._z
+                    );
+                    
+                    if (colliderData.type === 'box') {
+                        // Create box collider
+                        this.collisionBoxes.push({
+                            min: new Vector3(
+                                colliderPos.x - colliderData.scale._x / 2,
+                                colliderPos.y - colliderData.scale._y / 2,
+                                colliderPos.z - colliderData.scale._z / 2
+                            ),
+                            max: new Vector3(
+                                colliderPos.x + colliderData.scale._x / 2,
+                                colliderPos.y + colliderData.scale._y / 2,
+                                colliderPos.z + colliderData.scale._z / 2
+                            )
+                        });
+                        
+                        // Debug visualization
+                        this.createDebugBox(
+                            colliderPos,
+                            new Vector3(colliderData.scale._x, colliderData.scale._y, colliderData.scale._z),
+                            new Color3(1, 0, 0)
+                        );
+                        
+                    } else if (colliderData.type === 'cylinder') {
+                        // Create cylinder collider
+                        this.collisionCylinders.push({
+                            center: colliderPos,
+                            radius: colliderData.scale._x / 2,
+                            height: colliderData.scale._y
+                        });
+                        
+                        // Debug visualization
+                        this.createDebugCylinder(
+                            colliderPos,
+                            colliderData.scale._x / 2,
+                            colliderData.scale._y,
+                            new Color3(0, 1, 0)
+                        );
+                        
+                    } else if (colliderData.type === 'floor' || colliderData.type === 'ramp') {
+                        // Create floor zone
+                        let heightMap;
+                        let resolution = 1;
+                        
+                        if (colliderData.type === 'ramp') {
+                            // For ramps, create a height map that interpolates along the ramp
+                            resolution = 10; // Higher resolution for smooth ramp
+                            heightMap = [];
+                            
+                            // Calculate ramp direction based on rotation
+                            const rotY = colliderData.rotation ? colliderData.rotation._y : 0;
+                            const rotX = colliderData.rotation ? colliderData.rotation._x : 0;
+                            const rotZ = colliderData.rotation ? colliderData.rotation._z : 0;
+                            
+                            // Create height map grid
+                            for (let z = 0; z <= resolution; z++) {
+                                heightMap[z] = [];
+                                for (let x = 0; x <= resolution; x++) {
+                                    // Calculate position within the ramp (0 to 1)
+                                    const u = x / resolution;
+                                    const v = z / resolution;
+                                    
+                                    // Calculate height based on rotation
+                                    // Default ramp goes up along Z axis
+                                    let height = colliderPos.y;
+                                    
+                                    if (Math.abs(rotX) > 0.01) {
+                                        // Ramp tilted on X axis (front/back)
+                                        const t = v - 0.5; // -0.5 to 0.5
+                                        height += Math.tan(-rotX) * colliderData.scale._z * t; // Inverted rotation
+                                    }
+                                    
+                                    if (Math.abs(rotZ) > 0.01) {
+                                        // Ramp tilted on Z axis (left/right)
+                                        const t = u - 0.5; // -0.5 to 0.5
+                                        height += Math.tan(-rotZ) * colliderData.scale._x * t; // Inverted rotation
+                                    }
+                                    
+                                    heightMap[z][x] = height;
+                                }
+                            }
+                        } else {
+                            // For floors, use single height
+                            heightMap = [[colliderData.height || colliderPos.y]];
+                        }
+                        
+                        const floorZone = {
+                            bounds: {
+                                min: new Vector3(
+                                    colliderPos.x - colliderData.scale._x / 2,
+                                    colliderPos.y - colliderData.scale._y / 2,
+                                    colliderPos.z - colliderData.scale._z / 2
+                                ),
+                                max: new Vector3(
+                                    colliderPos.x + colliderData.scale._x / 2,
+                                    colliderPos.y + colliderData.scale._y / 2,
+                                    colliderPos.z + colliderData.scale._z / 2
+                                )
+                            },
+                            heightMap: heightMap,
+                            resolution: resolution,
+                            type: colliderData.type, // Store type for collision handling
+                            rotation: colliderData.rotation // Store rotation for collision calculations
+                        };
+                        
+                        this.floorZones.push(floorZone);
+                        
+                        // Debug visualization
+                        this.createDebugFloorZone(
+                            floorZone,
+                            colliderData.type === 'floor' ? new Color3(0, 0, 1) : new Color3(1, 0, 1),
+                            colliderData
+                        );
+                    }
+                });
+                
+                console.log(`Loaded ${setup.colliders.length} colliders for barrel at ${position.toString()}`);
+                return;
+            }
+        } catch (error) {
+            console.error('Failed to load barrel collision setup:', error);
+        }
+        
+        // No fallback - only use saved collision data
+        if (!setup || !setup.colliders) {
+            console.log('No collision data found for barrel - model will have no collision');
+        }
+    }
+    
+    private async loadBarrel(position: Vector3): Promise<void> {
+        try {
             
             // Create a simple scene loader for the barrel
             const result = await SceneLoader.LoadAssetContainerAsync(
@@ -654,7 +1002,6 @@ export class HD2DTownScene {
             // Instantiate the loaded meshes
             const barrelMeshes = result.instantiateModelsToScene();
             
-            console.log(`Loaded ${barrelMeshes.rootNodes.length} root nodes`);
             
             // Find the main mesh with geometry
             let barrelMesh: Mesh | null = null;
@@ -681,10 +1028,9 @@ export class HD2DTownScene {
                 return;
             }
             
-            console.log(`Found barrel mesh: ${barrelMesh.name} with ${barrelMesh.getTotalVertices()} vertices`);
             
-            // Position next to fountain (fountain is at 0,0,0)
-            const barrelPosition = new Vector3(2.5, 0, 0);
+            // Use the provided position
+            const barrelPosition = position;
             
             // Get the root node to apply transformations
             const rootNode = barrelMeshes.rootNodes[0];
@@ -700,7 +1046,12 @@ export class HD2DTownScene {
                 // Adjust Y position to sit on ground
                 rootNode.position.y = -minY;
                 
-                console.log(`Barrel positioned at: ${rootNode.position}`);
+                // Register model in global registry
+                ModelRegistry.getInstance().registerModel(
+                    'barrel',
+                    '/assets/models/Make_a_wooden_barrel__0725233815_texture.glb',
+                    rootNode
+                );
             }
             
             // Set rendering properties
@@ -716,10 +1067,9 @@ export class HD2DTownScene {
             
             // Create mesh collider for the barrel
             if (barrelMesh) {
-                this.createBarrelMeshCollider(barrelMesh);
+                await this.createBarrelMeshCollider(barrelMesh, barrelPosition);
             }
             
-            console.log('Barrel loaded successfully with mesh collider');
             
         } catch (error) {
             console.error('Failed to load barrel:', error);
@@ -738,6 +1088,14 @@ export class HD2DTownScene {
     
     public getCollisionBoxes(): Array<{min: Vector3, max: Vector3}> {
         return this.collisionBoxes;
+    }
+    
+    public getCollisionCylinders(): Array<{center: Vector3, radius: number, height: number}> {
+        return this.collisionCylinders;
+    }
+    
+    public getFloorZones(): Array<{bounds: {min: Vector3, max: Vector3}, heightMap: number[][], resolution: number}> {
+        return this.floorZones;
     }
     
     public getNPCs(): HD2DSprite[] {
