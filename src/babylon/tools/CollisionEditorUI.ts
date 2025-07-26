@@ -239,7 +239,7 @@ export class CollisionEditorUI {
         // File Operations panel
         const filePanel = new GUI.Rectangle();
         filePanel.width = "280px";
-        filePanel.height = "200px";
+        filePanel.height = "250px";
         filePanel.horizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
         filePanel.verticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
         filePanel.left = "-20px";  // 20px from right edge
@@ -282,14 +282,30 @@ export class CollisionEditorUI {
             document.getElementById('setupFile')?.click();
         });
         
+        this.addSpace(fileStack, 10);
+        
+        // Add wipe button with red color
+        const wipeBtn = this.createActionButton(fileStack, "Wipe Model Setup", () => {
+            this.editor.fileHandler.wipeModelSetup();
+        });
+        wipeBtn.background = "#8B0000"; // Dark red
+        wipeBtn.onPointerEnterObservable.clear();
+        wipeBtn.onPointerOutObservable.clear();
+        wipeBtn.onPointerEnterObservable.add(() => {
+            wipeBtn.background = "#B22222"; // Lighter red on hover
+        });
+        wipeBtn.onPointerOutObservable.add(() => {
+            wipeBtn.background = "#8B0000"; // Back to dark red
+        });
+        
         // Shortcuts panel
         const shortcutsPanel = new GUI.Rectangle();
         shortcutsPanel.width = "280px";
-        shortcutsPanel.height = "180px";
+        shortcutsPanel.height = "320px";  // Increased height for legend
         shortcutsPanel.horizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
         shortcutsPanel.verticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
         shortcutsPanel.left = "-20px";  // 20px from right edge
-        shortcutsPanel.top = "460px";
+        shortcutsPanel.top = "540px";
         shortcutsPanel.background = "#2c2c2c";
         shortcutsPanel.thickness = 1;
         shortcutsPanel.color = "#444";
@@ -317,6 +333,7 @@ export class CollisionEditorUI {
             "Q - Select tool",
             "E - Resize tool", 
             "R - Rotate tool",
+            "C - Center to origin",
             "1-4 - Place colliders",
             "Delete - Remove selected",
             "Space - Reset camera"
@@ -325,11 +342,60 @@ export class CollisionEditorUI {
         shortcuts.forEach(shortcut => {
             const text = new GUI.TextBlock();
             text.text = shortcut;
-            text.height = "18px";
+            text.height = "15px";  // Reduced height to fit legend
             text.color = "#888";
             text.fontSize = 11;
             text.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
             shortcutsStack.addControl(text);
+        });
+        
+        // Add separator
+        this.addSpace(shortcutsStack, 5);
+        const sep = new GUI.Rectangle();
+        sep.height = "1px";
+        sep.background = "#444";
+        sep.thickness = 0;
+        shortcutsStack.addControl(sep);
+        this.addSpace(shortcutsStack, 5);
+        
+        // Add color legend
+        this.createSection(shortcutsStack, "COLLIDER COLORS");
+        
+        const legend = [
+            { color: "#FF0000", text: "Box - Red" },
+            { color: "#00FF00", text: "Cylinder - Green" },
+            { color: "#0000FF", text: "Floor - Blue" },
+            { color: "#FF00FF", text: "Ramp - Magenta" },
+            { color: "#FFFF00", text: "Selected - Yellow" }
+        ];
+        
+        legend.forEach(item => {
+            const container = new GUI.StackPanel();
+            container.isVertical = false;
+            container.height = "15px";
+            shortcutsStack.addControl(container);
+            
+            // Color square
+            const colorSquare = new GUI.Rectangle();
+            colorSquare.width = "12px";
+            colorSquare.height = "12px";
+            colorSquare.background = item.color;
+            colorSquare.thickness = 0;
+            container.addControl(colorSquare);
+            
+            // Space
+            const space = new GUI.Rectangle();
+            space.width = "5px";
+            space.thickness = 0;
+            container.addControl(space);
+            
+            // Text
+            const text = new GUI.TextBlock();
+            text.text = item.text;
+            text.color = "#888";
+            text.fontSize = 11;
+            text.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+            container.addControl(text);
         });
     }
     

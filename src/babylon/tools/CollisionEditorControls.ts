@@ -84,6 +84,34 @@ export class CollisionEditorControls {
                         case 'delete':
                             this.editor.deleteSelectedCollider();
                             break;
+                        case 'c':
+                            // Center/snap selected collider to origin
+                            if (this.editor.selectedCollider) {
+                                const mesh = this.editor.selectedCollider;
+                                const data = this.editor.colliders.get(mesh);
+                                
+                                if (data) {
+                                    // First, temporarily move to origin to get accurate bounding box
+                                    mesh.position = Vector3.Zero();
+                                    mesh.computeWorldMatrix(true);
+                                    
+                                    // Get the bounding box
+                                    const boundingInfo = mesh.getBoundingInfo();
+                                    const boundingBox = boundingInfo.boundingBox;
+                                    
+                                    // Calculate how much to lift the mesh so its bottom is at Y=0
+                                    const bottomY = boundingBox.minimumWorld.y;
+                                    const liftAmount = -bottomY;
+                                    
+                                    // Set position with floor constraint
+                                    mesh.position = new Vector3(0, liftAmount, 0);
+                                    data.position = mesh.position.clone();
+                                }
+                                
+                                // Update UI to reflect change
+                                (this.editor as any).ui.updatePropertiesPanel();
+                            }
+                            break;
                     }
                 }
             } else if (kbInfo.type === KeyboardEventTypes.KEYUP) {
@@ -130,30 +158,86 @@ export class CollisionEditorControls {
     }
     
     public setupScaleConstraints(): void {
+        // Reset flag when called to ensure new observers are added
+        this.scaleConstraintsAdded = false;
+        
         // Set up scale constraints if not already done
         if (this.editor.gizmoManager.gizmos.scaleGizmo && !this.scaleConstraintsAdded) {
             this.scaleConstraintsAdded = true;
             
+            // Clear any existing observers first
+            this.editor.gizmoManager.gizmos.scaleGizmo.onDragStartObservable.clear();
+            this.editor.gizmoManager.gizmos.scaleGizmo.onDragObservable.clear();
+            this.editor.gizmoManager.gizmos.scaleGizmo.onDragEndObservable.clear();
+            
+            // Store initial bottom position before scaling
+            let initialBottomY = 0;
+            let previousScale = Vector3.One();
+            
+            this.editor.gizmoManager.gizmos.scaleGizmo.onDragStartObservable.add(() => {
+                if (this.editor.selectedCollider) {
+                    const mesh = this.editor.selectedCollider;
+                    mesh.computeWorldMatrix(true);
+                    const boundingInfo = mesh.getBoundingInfo();
+                    initialBottomY = boundingInfo.boundingBox.minimumWorld.y;
+                    previousScale = mesh.scaling.clone();
+                }
+            });
+            
             this.editor.gizmoManager.gizmos.scaleGizmo.onDragObservable.add(() => {
                 if (this.editor.selectedCollider) {
-                    const data = this.editor.colliders.get(this.editor.selectedCollider);
+                    const mesh = this.editor.selectedCollider;
+                    const data = this.editor.colliders.get(mesh);
                     if (data) {
                         // Apply constraints based on shape type
                         switch (data.type) {
                             case 'cylinder':
                                 // Keep X and Z scale uniform for cylinders
-                                const avgScale = (this.editor.selectedCollider.scaling.x + 
-                                                this.editor.selectedCollider.scaling.z) / 2;
-                                this.editor.selectedCollider.scaling.x = avgScale;
-                                this.editor.selectedCollider.scaling.z = avgScale;
+                                const avgScale = (mesh.scaling.x + mesh.scaling.z) / 2;
+                                mesh.scaling.x = avgScale;
+                                mesh.scaling.z = avgScale;
                                 break;
                             case 'floor':
                             case 'ramp':
                                 // Keep Y scale minimal for floor/ramp
-                                this.editor.selectedCollider.scaling.y = Math.max(0.1, 
-                                    Math.min(0.5, this.editor.selectedCollider.scaling.y));
+                                mesh.scaling.y = Math.max(0.1, Math.min(0.5, mesh.scaling.y));
                                 break;
                         }
+                        
+                        // If the bottom was at or near the ground, keep it there
+                        if (Math.abs(initialBottomY) < 0.1) {
+                            // Get the base height of the mesh (at scale 1)
+                            const tempScale = mesh.scaling.clone();
+                            mesh.scaling = Vector3.One();
+                            mesh.computeWorldMatrix(true);
+                            const baseHeight = mesh.getBoundingInfo().boundingBox.maximumWorld.y - 
+                                              mesh.getBoundingInfo().boundingBox.minimumWorld.y;
+                            mesh.scaling = tempScale;
+                            
+                            // Calculate new position to keep bottom at Y=0
+                            // The center needs to be at half the scaled height
+                            const newHeight = baseHeight * mesh.scaling.y;
+                            mesh.position.y = newHeight / 2;
+                        }
+                        
+                        // Update the stored collider data
+                        data.scale = mesh.scaling.clone();
+                        data.position = mesh.position.clone();
+                        
+                        // Update properties panel to show new scale
+                        (this.editor as any).ui.updatePropertiesPanel();
+                    }
+                }
+            });
+            
+            // Also update on drag end
+            this.editor.gizmoManager.gizmos.scaleGizmo.onDragEndObservable.add(() => {
+                if (this.editor.selectedCollider) {
+                    const data = this.editor.colliders.get(this.editor.selectedCollider);
+                    if (data) {
+                        // Final update of stored data
+                        data.scale = this.editor.selectedCollider.scaling.clone();
+                        (this.editor as any).ui.updatePropertiesPanel();
                     }
                 }
             });

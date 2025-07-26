@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Blacksmith Collision Data</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        pre {
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Clear Blacksmith Collision Data</h1>
+    <p>This will clear the corrupted collision data for the blacksmith model that has cylinders with incorrect height properties.</p>
+    
+    <button onclick="clearBlacksmithData()">Clear Blacksmith Collision Data</button>
+    
+    <div id="result"></div>
+    
+    <script>
+        function clearBlacksmithData() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '';
+            
+            try {
+                const modelName = 'blacksmith';
+                
+                // Remove from localStorage
+                const collisionKey = `sappyverse_collision_${modelName}`;
+                const hadCollisionData = localStorage.getItem(collisionKey) !== null;
+                localStorage.removeItem(collisionKey);
+                
+                // Remove from global collision registry
+                const allCollisions = JSON.parse(localStorage.getItem('sappyverse_all_collisions') || '{}');
+                const hadGlobalData = allCollisions[modelName] !== undefined;
+                delete allCollisions[modelName];
+                localStorage.setItem('sappyverse_all_collisions', JSON.stringify(allCollisions));
+                
+                // Update model registry to remove collision marker
+                const storedData = localStorage.getItem('sappyverse_model_registry');
+                let registryUpdated = false;
+                if (storedData) {
+                    try {
+                        const models = JSON.parse(storedData);
+                        const modelIndex = models.findIndex(m => m.name === modelName);
+                        if (modelIndex !== -1) {
+                            models[modelIndex].hasCollisions = false;
+                            delete models[modelIndex].collisionSetupPath;
+                            localStorage.setItem('sappyverse_model_registry', JSON.stringify(models));
+                            registryUpdated = true;
+                        }
+                    } catch (e) {
+                        console.error('Failed to update model registry:', e);
+                    }
+                }
+                
+                let message = '<h3 class="success">Successfully cleared blacksmith collision data!</h3>';
+                message += '<ul>';
+                message += `<li>Local collision data: ${hadCollisionData ? 'Removed' : 'Not found'}</li>`;
+                message += `<li>Global collision registry: ${hadGlobalData ? 'Removed' : 'Not found'}</li>`;
+                message += `<li>Model registry: ${registryUpdated ? 'Updated' : 'Not updated'}</li>`;
+                message += '</ul>';
+                message += '<p>You can now recreate the collision setup for the blacksmith model in the editor without the duplicate cylinder issue.</p>';
+                
+                resultDiv.innerHTML = message;
+                
+            } catch (error) {
+                resultDiv.innerHTML = '<p class="error">Error: ' + error.message + '</p>';
+            }
+        }
+    </script>
+</body>
+</html>

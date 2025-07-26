@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check Blacksmith Data</title>
+</head>
+<body>
+    <h1>Blacksmith Collision Data</h1>
+    <pre id="output"></pre>
+    <script>
+        const data = localStorage.getItem('sappyverse_collision_blacksmith');
+        const output = document.getElementById('output');
+        if (data) {
+            const parsed = JSON.parse(data);
+            output.textContent = JSON.stringify(parsed, null, 2);
+            
+            // Check for cylinders with height property
+            if (parsed.colliders) {
+                parsed.colliders.forEach((collider, index) => {
+                    if (collider.type === 'cylinder' && collider.height !== undefined) {
+                        output.textContent += `\n\nWARNING: Cylinder at index ${index} has height property: ${collider.height}`;
+                    }
+                    if (collider.isWalkable) {
+                        output.textContent += `\n\nNOTE: Collider at index ${index} (${collider.type}) is marked as walkable`;
+                    }
+                });
+            }
+        } else {
+            output.textContent = 'No collision data found for blacksmith';
+        }
+    </script>
+</body>
+</html>

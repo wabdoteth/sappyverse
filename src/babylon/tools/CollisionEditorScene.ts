@@ -88,21 +88,22 @@ export class CollisionEditorScene {
     
     public createMaterials(): void {
         this.materials = {
-            wall: this.createMaterial('wall', new Color3(0.8, 0.2, 0.2)),
-            box: this.createMaterial('box', new Color3(0.8, 0.2, 0.2)),
-            cylinder: this.createMaterial('cylinder', new Color3(0.2, 0.8, 0.2)),
-            floor: this.createMaterial('floor', new Color3(0.2, 0.2, 0.8)),
-            ramp: this.createMaterial('ramp', new Color3(0.8, 0.2, 0.8)),
-            selected: this.createMaterial('selected', new Color3(1, 1, 0))
+            wall: this.createMaterial('wall', new Color3(1, 0, 0)),      // Red - same as box
+            box: this.createMaterial('box', new Color3(1, 0, 0)),        // Red
+            cylinder: this.createMaterial('cylinder', new Color3(0, 1, 0)), // Green
+            floor: this.createMaterial('floor', new Color3(0, 0, 1)),    // Blue
+            ramp: this.createMaterial('ramp', new Color3(1, 0, 1)),      // Magenta
+            selected: this.createMaterial('selected', new Color3(1, 1, 0)) // Yellow
         };
     }
     
     private createMaterial(name: string, color: Color3): StandardMaterial {
-        const mat = new StandardMaterial(name + 'Mat', this.editor.scene);
-        mat.diffuseColor = color;
-        mat.alpha = 0.7;
+        const mat = new StandardMaterial(name + 'Mat_' + Date.now(), this.editor.scene);
+        mat.wireframe = true;
+        mat.emissiveColor = color;
+        mat.disableLighting = true;
+        mat.alpha = 0.5;
         mat.backFaceCulling = false;
-        mat.wireframe = false;
         return mat;
     }
     

@@ -830,38 +830,8 @@ export class HD2DGame {
             }
         }
         
-        // Then check cylinders (objects player can stand on)
-        if (!foundElevation) {
-            for (const cylinder of this.collisionCylinders) {
-                // 2D distance check
-                const dx = position.x - cylinder.center.x;
-                const dz = position.z - cylinder.center.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                
-                // Check if player is within the cylinder's radius (can stand on top)
-                if (distance < cylinder.radius) {
-                    // Player is on top of the cylinder
-                    targetHeight = defaultHeight + cylinder.height;
-                    foundElevation = true;
-                    break;
-                }
-                // Check if player is on the edge (partially on cylinder)
-                else if (distance < (halfWidth + cylinder.radius)) {
-                    // Calculate how much the player overlaps with the cylinder
-                    const overlap = (halfWidth + cylinder.radius) - distance;
-                    const overlapRatio = overlap / halfWidth;
-                    
-                    // If significant overlap, lift player proportionally
-                    if (overlapRatio > 0.3) {
-                        const cylinderHeight = defaultHeight + cylinder.height;
-                        // Smooth transition from current height to cylinder height
-                        targetHeight = defaultHeight + (cylinderHeight - defaultHeight) * overlapRatio;
-                        foundElevation = true;
-                        break;
-                    }
-                }
-            }
-        }
+        // Cylinders are now only used for collision, not for walking on
+        // Removed cylinder walking logic - cylinders should block movement, not be walkable
         
         // Smoothly adjust to target height
         const newPosition = position.clone();
@@ -1070,6 +1040,87 @@ export class HD2DGame {
         if (this.playerDebugLine) {
             this.playerDebugLine.setEnabled(visible);
         }
+        
+        // Log all colliders when enabling debug mode
+        if (visible) {
+            this.logAllColliders();
+        }
+    }
+    
+    private logAllColliders(): void {
+        console.group('=== ALL COLLIDERS AND DEBUG OBJECTS ===');
+        
+        // Log collision boxes
+        console.group('📦 Collision Boxes:', this.collisionBoxes.length);
+        this.collisionBoxes.forEach((box, index) => {
+            console.log(`Box ${index}:`, {
+                min: `(${box.min.x.toFixed(2)}, ${box.min.y.toFixed(2)}, ${box.min.z.toFixed(2)})`,
+                max: `(${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`,
+                width: (box.max.x - box.min.x).toFixed(2),
+                height: (box.max.y - box.min.y).toFixed(2),
+                depth: (box.max.z - box.min.z).toFixed(2)
+            });
+        });
+        console.groupEnd();
+        
+        // Log collision cylinders
+        console.group('🛢️ Collision Cylinders:', this.collisionCylinders.length);
+        this.collisionCylinders.forEach((cylinder, index) => {
+            console.log(`Cylinder ${index}:`, {
+                center: `(${cylinder.center.x.toFixed(2)}, ${cylinder.center.y.toFixed(2)}, ${cylinder.center.z.toFixed(2)})`,
+                radius: cylinder.radius.toFixed(2),
+                height: cylinder.height.toFixed(2)
+            });
+        });
+        console.groupEnd();
+        
+        // Log floor zones
+        console.group('🟦 Floor Zones:', this.floorZones.length);
+        this.floorZones.forEach((zone, index) => {
+            console.log(`Floor Zone ${index}:`, {
+                type: zone.type || 'floor',
+                bounds: {
+                    min: `(${zone.bounds.min.x.toFixed(2)}, ${zone.bounds.min.y.toFixed(2)}, ${zone.bounds.min.z.toFixed(2)})`,
+                    max: `(${zone.bounds.max.x.toFixed(2)}, ${zone.bounds.max.y.toFixed(2)}, ${zone.bounds.max.z.toFixed(2)})`
+                },
+                heightMapSize: `${zone.heightMap.length}x${zone.heightMap[0]?.length || 0}`,
+                resolution: zone.resolution
+            });
+        });
+        console.groupEnd();
+        
+        // Log debug meshes
+        console.group('🟨 Debug Meshes:', this.debugMeshes.length);
+        this.debugMeshes.forEach((mesh, index) => {
+            const material = mesh.material as StandardMaterial;
+            console.log(`Debug Mesh ${index} - ${mesh.name}:`, {
+                position: `(${mesh.position.x.toFixed(2)}, ${mesh.position.y.toFixed(2)}, ${mesh.position.z.toFixed(2)})`,
+                enabled: mesh.isEnabled(),
+                color: material ? material.diffuseColor || material.emissiveColor : 'N/A',
+                type: mesh.name.includes('Box') ? 'Box' : 
+                      mesh.name.includes('Cylinder') ? 'Cylinder' : 
+                      mesh.name.includes('Floor') ? 'Floor' : 'Unknown'
+            });
+        });
+        console.groupEnd();
+        
+        // Log all meshes with "debug" in their name
+        console.group('🔍 Scene Debug Meshes:');
+        this.scene.meshes.forEach(mesh => {
+            if (mesh.name.toLowerCase().includes('debug')) {
+                const material = mesh.material as StandardMaterial;
+                console.log(`${mesh.name}:`, {
+                    position: `(${mesh.position.x.toFixed(2)}, ${mesh.position.y.toFixed(2)}, ${mesh.position.z.toFixed(2)})`,
+                    enabled: mesh.isEnabled(),
+                    visible: mesh.isVisible,
+                    wireframe: material?.wireframe || false,
+                    color: material ? (material.emissiveColor || material.diffuseColor) : 'N/A'
+                });
+            }
+        });
+        console.groupEnd();
+        
+        console.groupEnd();
     }
     
     public toggleCollisionDebug(visible: boolean): void {
@@ -1133,7 +1184,7 @@ export class HD2DGame {
         }
     }
     
-    public toggleOutlines(enabled: boolean): void {
+    public toggleHD2DOutlines(enabled: boolean): void {
         this.outlineEnabled = enabled;
         if (this.hd2dOutlineSystem) {
             this.hd2dOutlineSystem.setEnabled(enabled);
@@ -1454,57 +1505,16 @@ export class HD2DGame {
     
     
     private createDebugVisuals(): void {
-        // Create debug boxes for all collision boxes
-        this.collisionBoxes.forEach((box, index) => {
-            const width = box.max.x - box.min.x;
-            const height = box.max.y - box.min.y;
-            const depth = box.max.z - box.min.z;
-            
-            const debugBox = CreateBox(`debugBox${index}`, {
-                width: width,
-                height: 0.1,
-                depth: depth
-            }, this.scene);
-            
-            debugBox.position = new Vector3(
-                (box.min.x + box.max.x) / 2,
-                0.05,
-                (box.min.z + box.max.z) / 2
-            );
-            
-            const debugMat = new StandardMaterial(`debugMat${index}`, this.scene);
-            debugMat.diffuseColor = new Color3(1, 0, 0);
-            debugMat.alpha = 0.3;
-            debugMat.emissiveColor = new Color3(1, 0, 0);
-            debugBox.material = debugMat;
-            debugBox.renderingGroupId = 3; // Above everything else
-            
-            this.debugMeshes.push(debugBox);
-        });
+        console.log('Creating debug visuals for HD2DGame...');
+        console.log('Total collision boxes:', this.collisionBoxes.length);
+        console.log('Total collision cylinders:', this.collisionCylinders.length);
+        console.log('Total floor zones:', this.floorZones.length);
         
-        // Create debug cylinders for cylinder collisions
-        this.collisionCylinders.forEach((cylinder, index) => {
-            const debugCylinder = CreateCylinder(`debugCylinder${index}`, {
-                diameter: cylinder.radius * 2,
-                height: cylinder.height, // Use actual cylinder height
-                tessellation: 16
-            }, this.scene);
-            
-            debugCylinder.position = new Vector3(
-                cylinder.center.x,
-                cylinder.height / 2, // Position at half height so bottom sits on ground
-                cylinder.center.z
-            );
-            
-            const debugMat = new StandardMaterial(`debugCylinderMat${index}`, this.scene);
-            debugMat.diffuseColor = new Color3(1, 1, 0); // Yellow for cylinders
-            debugMat.alpha = 0.3;
-            debugMat.emissiveColor = new Color3(1, 1, 0);
-            debugCylinder.material = debugMat;
-            debugCylinder.renderingGroupId = 3; // Above everything else
-            
-            this.debugMeshes.push(debugCylinder);
-        });
+        // Skip creating debug boxes - HD2DTownScene already creates them as debugColliderBox
+        // This avoids duplicate red boxes appearing
+        
+        // Skip creating debug cylinders - HD2DTownScene already creates them as debugColliderCylinder
+        // This avoids duplicate yellow cylinders appearing
         
         // Create player collision line
         const spriteWidth = 3;
@@ -1532,29 +1542,7 @@ export class HD2DGame {
             // Determine the ground height at player's position
             let groundHeight = 0;
             
-            // Check if player is on a cylinder
-            const spriteWidth = 3;
-            const playerCollisionWidth = (22 / 96) * spriteWidth;
-            const halfWidth = playerCollisionWidth / 2;
-            
-            for (const cylinder of this.collisionCylinders) {
-                const dx = this.player.position.x - cylinder.center.x;
-                const dz = this.player.position.z - cylinder.center.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                
-                if (distance < cylinder.radius) {
-                    groundHeight = cylinder.height;
-                    break;
-                } else if (distance < (halfWidth + cylinder.radius)) {
-                    // On edge - calculate interpolated height
-                    const overlap = (halfWidth + cylinder.radius) - distance;
-                    const overlapRatio = overlap / halfWidth;
-                    if (overlapRatio > 0.3) {
-                        groundHeight = cylinder.height * overlapRatio;
-                        break;
-                    }
-                }
-            }
+            // Cylinders no longer affect ground height - removed cylinder ground check
             
             // Position debug line at the ground level beneath the player
             this.playerDebugLine.position.y = groundHeight + 0.05;

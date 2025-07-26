@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Inspect Blacksmith Collision Data</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        pre {
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .warning {
+            color: red;
+            font-weight: bold;
+        }
+        .info {
+            color: blue;
+        }
+    </style>
+</head>
+<body>
+    <h1>Blacksmith Collision Data Inspector</h1>
+    
+    <button onclick="inspectData()">Inspect Current Data</button>
+    <button onclick="fixData()">Fix Problematic Data</button>
+    
+    <div id="output"></div>
+    
+    <script>
+        function inspectData() {
+            const output = document.getElementById('output');
+            output.innerHTML = '';
+            
+            const data = localStorage.getItem('sappyverse_collision_blacksmith');
+            if (!data) {
+                output.innerHTML = '<p>No collision data found for blacksmith</p>';
+                return;
+            }
+            
+            const parsed = JSON.parse(data);
+            output.innerHTML += '<h2>Raw Data:</h2>';
+            output.innerHTML += '<pre>' + JSON.stringify(parsed, null, 2) + '</pre>';
+            
+            // Check for problematic cylinders
+            output.innerHTML += '<h2>Analysis:</h2>';
+            let problems = [];
+            
+            parsed.colliders.forEach((collider, index) => {
+                if (collider.type === 'cylinder') {
+                    if (collider.height !== undefined) {
+                        problems.push(`<p class="warning">Cylinder ${index} has height property: ${collider.height}</p>`);
+                    }
+                    if (collider.isWalkable) {
+                        problems.push(`<p class="warning">Cylinder ${index} is marked as walkable!</p>`);
+                    }
+                }
+            });
+            
+            if (problems.length > 0) {
+                output.innerHTML += '<div>' + problems.join('') + '</div>';
+            } else {
+                output.innerHTML += '<p class="info">No problems found with cylinders</p>';
+            }
+        }
+        
+        function fixData() {
+            const data = localStorage.getItem('sappyverse_collision_blacksmith');
+            if (!data) {
+                alert('No collision data found for blacksmith');
+                return;
+            }
+            
+            const parsed = JSON.parse(data);
+            let fixed = false;
+            
+            // Fix cylinders
+            parsed.colliders.forEach((collider) => {
+                if (collider.type === 'cylinder') {
+                    if (collider.height !== undefined) {
+                        delete collider.height;
+                        fixed = true;
+                    }
+                    if (collider.isWalkable) {
+                        collider.isWalkable = false;
+                        fixed = true;
+                    }
+                }
+            });
+            
+            if (fixed) {
+                localStorage.setItem('sappyverse_collision_blacksmith', JSON.stringify(parsed));
+                alert('Fixed cylinder data! Refresh the game to see changes.');
+                inspectData(); // Re-inspect
+            } else {
+                alert('No problems found to fix');
+            }
+        }
+        
+        // Auto-inspect on load
+        window.onload = inspectData;
+    </script>
+</body>
+</html>

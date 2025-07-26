@@ -24,14 +24,32 @@ export class CollisionEditorFileHandler {
         };
         
         this.editor.colliders.forEach((data, mesh) => {
-            setup.colliders.push({
+            // Get actual world dimensions instead of just scale factors
+            mesh.computeWorldMatrix(true);
+            const boundingInfo = mesh.getBoundingInfo();
+            const boundingBox = boundingInfo.boundingBox;
+            
+            // Calculate actual dimensions in world space
+            const dimensions = {
+                _x: boundingBox.maximumWorld.x - boundingBox.minimumWorld.x,
+                _y: boundingBox.maximumWorld.y - boundingBox.minimumWorld.y,
+                _z: boundingBox.maximumWorld.z - boundingBox.minimumWorld.z
+            };
+            
+            const colliderData: any = {
                 type: data.type,
                 position: mesh.position.clone(),
                 rotation: mesh.rotation.clone(),
-                scale: mesh.scaling.clone(),
-                isWalkable: data.isWalkable || false,
-                height: data.height || mesh.position.y
-            });
+                scale: dimensions, // Store actual dimensions, not scale factors
+                isWalkable: data.isWalkable || false
+            };
+            
+            // Only add height for floors and ramps
+            if (data.type === 'floor' || data.type === 'ramp') {
+                colliderData.height = data.height || mesh.position.y;
+            }
+            
+            setup.colliders.push(colliderData);
         });
         
         const json = JSON.stringify(setup, null, 2);
@@ -91,7 +109,29 @@ export class CollisionEditorFileHandler {
             const lastMesh = meshes[meshes.length - 1];
             if (lastMesh) {
                 lastMesh.rotation = new Vector3(data.rotation._x, data.rotation._y, data.rotation._z);
-                lastMesh.scaling = new Vector3(data.scale._x, data.scale._y, data.scale._z);
+                
+                // Calculate what scale factors would produce the saved dimensions
+                // First get the base dimensions of the mesh at scale 1
+                lastMesh.scaling = Vector3.One();
+                lastMesh.computeWorldMatrix(true);
+                const boundingInfo = lastMesh.getBoundingInfo();
+                const baseBounds = boundingInfo.boundingBox;
+                const baseWidth = baseBounds.maximumWorld.x - baseBounds.minimumWorld.x;
+                const baseHeight = baseBounds.maximumWorld.y - baseBounds.minimumWorld.y;
+                const baseDepth = baseBounds.maximumWorld.z - baseBounds.minimumWorld.z;
+                
+                // Calculate scale factors to achieve target dimensions
+                const scaleX = baseWidth > 0 ? data.scale._x / baseWidth : 1;
+                const scaleY = baseHeight > 0 ? data.scale._y / baseHeight : 1;
+                const scaleZ = baseDepth > 0 ? data.scale._z / baseDepth : 1;
+                
+                lastMesh.scaling = new Vector3(scaleX, scaleY, scaleZ);
+                
+                // Update the collider data
+                const colliderData = this.editor.colliders.get(lastMesh);
+                if (colliderData) {
+                    colliderData.scale = lastMesh.scaling.clone();
+                }
             }
         });
         
@@ -163,9 +203,7 @@ export class CollisionEditorFileHandler {
             // Store the container reference
             this.editor.loadedContainer = result;
             
-            // Add to scene
-            result.addAllToScene();
-            
+            // Don't call addAllToScene - we'll use instantiateModelsToScene instead
             // Get the instantiated model
             const instances = result.instantiateModelsToScene();
             
@@ -178,6 +216,28 @@ export class CollisionEditorFileHandler {
                 this.editor.loadedModel.rotation = new Vector3(0, 0, 0);
                 this.editor.loadedModel.scaling = modelData.scale ? 
                     modelData.scale.clone() : new Vector3(1, 1, 1);
+                
+                // Find the main mesh to compute bounds
+                let mainMesh = null;
+                const meshes = this.editor.loadedModel.getChildMeshes();
+                for (const mesh of meshes) {
+                    if (mesh.getTotalVertices && mesh.getTotalVertices() > 0) {
+                        mainMesh = mesh;
+                        break;
+                    }
+                }
+                
+                // Adjust Y position to sit on ground
+                if (mainMesh) {
+                    mainMesh.computeWorldMatrix(true);
+                    const bounds = mainMesh.getBoundingInfo().boundingBox;
+                    const minY = bounds.minimumWorld.y;
+                    
+                    // Adjust Y position so bottom of model sits at Y=0
+                    if (minY !== 0) {
+                        this.editor.loadedModel.position.y = -minY;
+                    }
+                }
                 
                 // Make model non-pickable so it can't be selected/moved
                 this.editor.loadedModel.getChildMeshes().forEach((mesh: any) => {
@@ -249,14 +309,32 @@ export class CollisionEditorFileHandler {
         };
         
         this.editor.colliders.forEach((data, mesh) => {
-            setup.colliders.push({
+            // Get actual world dimensions instead of just scale factors
+            mesh.computeWorldMatrix(true);
+            const boundingInfo = mesh.getBoundingInfo();
+            const boundingBox = boundingInfo.boundingBox;
+            
+            // Calculate actual dimensions in world space
+            const dimensions = {
+                _x: boundingBox.maximumWorld.x - boundingBox.minimumWorld.x,
+                _y: boundingBox.maximumWorld.y - boundingBox.minimumWorld.y,
+                _z: boundingBox.maximumWorld.z - boundingBox.minimumWorld.z
+            };
+            
+            const colliderData: any = {
                 type: data.type,
                 position: mesh.position.clone(),
                 rotation: mesh.rotation.clone(),
-                scale: mesh.scaling.clone(),
-                isWalkable: data.isWalkable || false,
-                height: data.height || mesh.position.y
-            });
+                scale: dimensions, // Store actual dimensions, not scale factors
+                isWalkable: data.isWalkable || false
+            };
+            
+            // Only add height for floors and ramps
+            if (data.type === 'floor' || data.type === 'ramp') {
+                colliderData.height = data.height || mesh.position.y;
+            }
+            
+            setup.colliders.push(colliderData);
         });
         
         // Store in localStorage for immediate availability
@@ -329,5 +407,60 @@ export class CollisionEditorFileHandler {
         } catch (error) {
             alert(`No collision data found for model: ${this.editor.currentModelName}`);
         }
+    }
+    
+    public wipeModelSetup(): void {
+        if (!this.editor.currentModelName) {
+            alert('Please load a model first');
+            return;
+        }
+        
+        const modelName = this.editor.currentModelName;
+        
+        // Confirm action
+        if (!confirm(`This will permanently delete all collision data for "${modelName}".\n\nAre you sure you want to continue?`)) {
+            return;
+        }
+        
+        // Clear from editor
+        this.editor.clearAllColliders();
+        
+        // Remove from localStorage
+        const collisionKey = `sappyverse_collision_${modelName}`;
+        localStorage.removeItem(collisionKey);
+        
+        // Remove from global collision registry
+        const allCollisions = JSON.parse(localStorage.getItem('sappyverse_all_collisions') || '{}');
+        delete allCollisions[modelName];
+        localStorage.setItem('sappyverse_all_collisions', JSON.stringify(allCollisions));
+        
+        // Update model registry to remove collision marker
+        const registry = (window as any).__modelRegistry;
+        if (registry) {
+            const model = registry.getModel(modelName);
+            if (model) {
+                delete model.collisionSetupPath;
+                registry.syncToStorage();
+            }
+        }
+        
+        // Also update localStorage model registry
+        const storedData = localStorage.getItem('sappyverse_model_registry');
+        if (storedData) {
+            try {
+                const models = JSON.parse(storedData);
+                const modelIndex = models.findIndex((m: any) => m.name === modelName);
+                if (modelIndex !== -1) {
+                    models[modelIndex].hasCollisions = false;
+                    delete models[modelIndex].collisionSetupPath;
+                    localStorage.setItem('sappyverse_model_registry', JSON.stringify(models));
+                }
+            } catch (e) {
+                console.error('Failed to update model registry:', e);
+            }
+        }
+        
+        alert(`All collision data for "${modelName}" has been wiped.`);
+        console.log(`Wiped collision data for ${modelName}`);
     }
 }

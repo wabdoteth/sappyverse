@@ -1,0 +1,13 @@
+Blacksmith Model Information
+============================
+
+Position: (-10, 0, 10)
+Scale: (5, 5, 5)
+Model Path: /assets/models/blacksmith.glb
+Collision Data Path: /src/babylon/data/blacksmith-collision.json
+
+Notes:
+- Model was positioned at world coordinates (-10, 0, 10)
+- Model was scaled up by 5x in all dimensions
+- Model was registered in the ModelRegistry
+- Collision data was loaded from localStorage first, then from JSON file as fallback
