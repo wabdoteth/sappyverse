@@ -34,6 +34,11 @@ export class CollisionEditorScene {
         this.camera.setTarget(Vector3.Zero());
         this.camera.attachControl(this.editor.canvas, true);
         
+        // Smoother camera settings
+        this.camera.speed = 0.05;  // Much slower base speed
+        this.camera.inertia = 0.9;  // Higher inertia for smoother stops
+        this.camera.angularSensibility = 4000;  // Less aggressive rotation (higher = slower)
+        
         // Disable default keyboard controls to use our own WASD
         this.camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
         

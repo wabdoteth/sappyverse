@@ -729,27 +729,8 @@ export class HD2DGame {
             }
         }
         
-        // Check cylinder collisions (for round objects like barrels)
-        // REMOVED SIDE COLLISION FOR NOW - only using height adjustment
-        /*
-        for (const cylinder of this.collisionCylinders) {
-            // 2D distance check (ignoring Y for now)
-            const dx = position.x - cylinder.center.x;
-            const dz = position.z - cylinder.center.z;
-            const distance = Math.sqrt(dx * dx + dz * dz);
-            
-            // Check if player circle overlaps with cylinder
-            if (distance < (halfWidth + cylinder.radius)) {
-                // Check if player is above the cylinder (trying to walk on top)
-                // Barrel height is stored in cylinder.height
-                if (position.y > cylinder.height * 0.8) {
-                    // Player is high enough to be on top, allow movement
-                    continue;
-                }
-                return true; // Collision detected (side collision)
-            }
-        }
-        */
+        // Cylinder collisions are handled as solid obstacles
+        // Only floors and ramps are walkable surfaces
         
         // Check mesh collisions using precise mesh intersection
         if (this.playerCollisionMesh) {

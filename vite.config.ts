@@ -13,7 +13,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
-        collisionEditor: path.resolve(__dirname, 'collision-editor-new.html')
+        collisionEditor: path.resolve(__dirname, 'collision-editor.html')
       }
     }
   },

@@ -25,6 +25,7 @@ import { FountainWaterFlow } from '../effects/FountainWaterFlow';
 import { ModelLoader, Props3D } from '../loaders/ModelLoader';
 import { MeshColliderDecomposer } from '../utils/MeshColliderDecomposer';
 import { ModelRegistry } from '../systems/ModelRegistry';
+import { ModelPositioning } from '../utils/ModelPositioning';
 
 export class HD2DTownScene {
     private scene: Scene;
@@ -578,11 +579,11 @@ export class HD2DTownScene {
         // Register all models that will be used in the scene
         // This should be done once at startup, not every time we load an instance
         
-        // Load barrel model to register it
+        // Register barrel model
         try {
             const result = await SceneLoader.LoadAssetContainerAsync(
                 '/assets/models/',
-                'Make_a_wooden_barrel__0725233815_texture.glb',
+                'barrel.glb',
                 this.scene
             );
             
@@ -594,7 +595,7 @@ export class HD2DTownScene {
                 
                 ModelRegistry.getInstance().registerModel(
                     'barrel',
-                    '/assets/models/Make_a_wooden_barrel__0725233815_texture.glb',
+                    '/assets/models/barrel.glb',
                     rootNode,
                     null
                 );
@@ -674,16 +675,15 @@ export class HD2DTownScene {
     }
     
     private async create3DProps(): Promise<void> {
-        // Load models from registry at different locations
-        await this.loadModelWithCollisions('barrel', new Vector3(2.5, 0, 0), new Vector3(1, 1, 1));
-        await this.loadModelWithCollisions('barrel', new Vector3(-5, 0, -8), new Vector3(2, 2, 2));
+        // Add barrel near the fountain (fountain is at 0,0,0)
+        await this.loadModelWithCollisions('barrel', new Vector3(2.5, 0, -2.5), new Vector3(1, 1, 1));
         
         // Add blacksmith in back left corner
         // Back left would be negative X and positive Z (assuming Z is forward)
         await this.loadModelWithCollisions('blacksmith', new Vector3(-15, 0, 15), new Vector3(1, 1, 1));
     }
     
-    private async loadModelCollisions(modelName: string, modelMesh: Mesh, position: Vector3): Promise<void> {
+    private async loadModelCollisions(modelName: string, modelMesh: Mesh, position: Vector3, yOffset: number = 0, modelScale: Vector3 = new Vector3(1, 1, 1)): Promise<void> {
         // Disable mesh-based collision, use primitive colliders instead
         modelMesh.checkCollisions = false;
         
@@ -701,9 +701,6 @@ export class HD2DTownScene {
             }
             
             if (setup && setup.colliders) {
-                // Get the model's scale from its root transform
-                const modelScale = modelMesh.parent ? modelMesh.parent.scaling : new Vector3(1, 1, 1);
-                
                 // Apply colliders from setup with position offset
                 setup.colliders.forEach((colliderData, index) => {
                     console.log(`Processing collider ${index} for ${modelName}:`, {
@@ -713,11 +710,18 @@ export class HD2DTownScene {
                         height: colliderData.height
                     });
                     
-                    // Apply position offset to all collider positions, scaled by model scale
-                    const colliderPos = new Vector3(
-                        position.x + colliderData.position._x * modelScale.x,
-                        position.y + colliderData.position._y * modelScale.y,
-                        position.z + colliderData.position._z * modelScale.z
+                    // Use shared utility to adjust collider position
+                    const colliderLocalPos = new Vector3(
+                        colliderData.position._x,
+                        colliderData.position._y,
+                        colliderData.position._z
+                    );
+                    
+                    const colliderPos = ModelPositioning.adjustColliderPosition(
+                        colliderLocalPos,
+                        position,
+                        yOffset,
+                        modelScale
                     );
                     
                     if (colliderData.type === 'box') {
@@ -825,8 +829,12 @@ export class HD2DTownScene {
                                 }
                             }
                         } else {
-                            // For floors, use single height
-                            heightMap = [[colliderData.height || colliderPos.y]];
+                            // For floors, create a 2x2 grid with uniform height
+                            const floorHeight = colliderData.height || colliderPos.y;
+                            heightMap = [
+                                [floorHeight, floorHeight],
+                                [floorHeight, floorHeight]
+                            ];
                         }
                         
                         // Scale floor zone dimensions
@@ -903,52 +911,28 @@ export class HD2DTownScene {
             const modelInstance = result.instantiateModelsToScene();
             
             
-            // Find the main mesh with geometry
-            let mainMesh: Mesh | null = null;
-            for (const rootNode of modelInstance.rootNodes) {
-                if (rootNode instanceof Mesh && rootNode.getTotalVertices() > 0) {
-                    mainMesh = rootNode;
-                    break;
-                }
-                
-                // Check children
-                const children = rootNode.getChildMeshes();
-                for (const child of children) {
-                    if (child instanceof Mesh && child.getTotalVertices() > 0) {
-                        mainMesh = child;
-                        break;
-                    }
-                }
-                
-                if (mainMesh) break;
-            }
+            // Find the main mesh with geometry using shared utility
+            const mainMesh = ModelPositioning.findMainMesh(modelInstance.rootNodes);
             
             if (!mainMesh) {
                 console.error(`No mesh with geometry found in ${modelName} model`);
                 return;
             }
             
-            
-            // Use the provided position
-            const modelPosition = position;
-            
             // Get the root node to apply transformations
             const rootNode = modelInstance.rootNodes[0];
+            let yOffset = 0; // Track the Y offset for collisions
+            
             if (rootNode) {
-                // Note: Model should already be registered in the registry
-                // We're just loading an instance here
+                // Apply scale
+                rootNode.scaling = scale;
                 
-                // Apply instance-specific transformations
-                rootNode.position = modelPosition;
-                rootNode.scaling = scale; // Use provided scale
-                
-                // Compute bounds to position correctly on ground
-                mainMesh.computeWorldMatrix(true);
-                const bounds = mainMesh.getBoundingInfo().boundingBox;
-                const minY = bounds.minimumWorld.y;
-                
-                // Adjust Y position to sit on ground (preserve intended Y offset)
-                rootNode.position.y = modelPosition.y - minY;
+                // Position model on ground using shared utility
+                yOffset = ModelPositioning.positionModelOnGround(
+                    rootNode,
+                    mainMesh,
+                    position
+                );
             }
             
             // Set rendering properties
@@ -963,8 +947,9 @@ export class HD2DTownScene {
             });
             
             // Load collision data for the model
-            if (mainMesh) {
-                await this.loadModelCollisions(modelName, mainMesh, modelPosition);
+            if (mainMesh && rootNode) {
+                // Pass the Y offset so collisions can be adjusted the same way
+                await this.loadModelCollisions(modelName, mainMesh, rootNode.position, yOffset, scale);
             }
             
             

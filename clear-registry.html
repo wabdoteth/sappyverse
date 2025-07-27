@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Sappyverse Registry</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #e8f5e9;
+            border: 1px solid #4caf50;
+        }
+        .log {
+            margin: 5px 0;
+            color: #2e7d32;
+            font-family: monospace;
+        }
+        .error {
+            color: #d32f2f;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .danger {
+            background-color: #f44336;
+        }
+        .danger:hover {
+            background-color: #d32f2f;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Clear Sappyverse Registry</h1>
+        <p>This page allows you to clear various parts of the Sappyverse localStorage data.</p>
+        
+        <div class="status">
+            <h3>Current localStorage Data:</h3>
+            <div id="currentData"></div>
+        </div>
+        
+        <div class="actions">
+            <h3>Clear Options:</h3>
+            <button onclick="clearModelRegistry()">Clear Model Registry</button>
+            <button onclick="clearAllCollisions()">Clear All Collision Data</button>
+            <button onclick="clearSpecificModel()">Clear Specific Model</button>
+            <button class="danger" onclick="clearAllSappyverse()">Clear ALL Sappyverse Data</button>
+        </div>
+        
+        <div class="status">
+            <h3>Action Log:</h3>
+            <div id="logs"></div>
+        </div>
+        
+        <button onclick="window.location.href='index.html'">Go to Game</button>
+        <button onclick="window.location.href='collision-editor.html'">Go to Collision Editor</button>
+    </div>
+
+    <script>
+        function addLog(message, isError = false) {
+            const logsDiv = document.getElementById('logs');
+            const log = document.createElement('div');
+            log.className = isError ? 'log error' : 'log';
+            log.textContent = new Date().toLocaleTimeString() + ' - ' + message;
+            logsDiv.appendChild(log);
+            console.log(message);
+        }
+
+        function showCurrentData() {
+            const dataDiv = document.getElementById('currentData');
+            dataDiv.innerHTML = '';
+            
+            // Find all sappyverse-related keys
+            const sappyverseKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (key.includes('sappyverse') || key.includes('model'))) {
+                    sappyverseKeys.push(key);
+                }
+            }
+            
+            if (sappyverseKeys.length === 0) {
+                dataDiv.innerHTML = '<p>No Sappyverse data found in localStorage</p>';
+                return;
+            }
+            
+            sappyverseKeys.forEach(key => {
+                const value = localStorage.getItem(key);
+                const item = document.createElement('div');
+                item.style.marginBottom = '10px';
+                
+                let displayValue = value;
+                try {
+                    const parsed = JSON.parse(value);
+                    displayValue = JSON.stringify(parsed, null, 2);
+                } catch (e) {
+                    // Not JSON, show as is
+                }
+                
+                item.innerHTML = `<strong>${key}:</strong><pre>${displayValue}</pre>`;
+                dataDiv.appendChild(item);
+            });
+        }
+
+        function clearModelRegistry() {
+            addLog('Clearing model registry...');
+            
+            // Clear the model registry
+            const registryKey = 'sappyverse_model_registry';
+            if (localStorage.getItem(registryKey)) {
+                localStorage.removeItem(registryKey);
+                addLog('Removed model registry');
+            } else {
+                addLog('No model registry found');
+            }
+            
+            showCurrentData();
+        }
+
+        function clearAllCollisions() {
+            addLog('Clearing all collision data...');
+            
+            // Clear all collision keys
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.includes('sappyverse_collision_')) {
+                    keysToRemove.push(key);
+                }
+            }
+            
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+                addLog(`Removed collision data: ${key}`);
+            });
+            
+            // Also clear the all collisions registry
+            const allCollisionsKey = 'sappyverse_all_collisions';
+            if (localStorage.getItem(allCollisionsKey)) {
+                localStorage.removeItem(allCollisionsKey);
+                addLog('Removed all collisions registry');
+            }
+            
+            if (keysToRemove.length === 0 && !localStorage.getItem(allCollisionsKey)) {
+                addLog('No collision data found');
+            }
+            
+            showCurrentData();
+        }
+
+        function clearSpecificModel() {
+            const modelName = prompt('Enter model name to clear (e.g., "blacksmith"):');
+            if (!modelName) return;
+            
+            addLog(`Clearing data for model: ${modelName}`);
+            
+            // Remove from model registry
+            const registryKey = 'sappyverse_model_registry';
+            const registryData = localStorage.getItem(registryKey);
+            if (registryData) {
+                try {
+                    let models = JSON.parse(registryData);
+                    const originalLength = models.length;
+                    models = models.filter(model => model.name !== modelName);
+                    
+                    if (models.length < originalLength) {
+                        localStorage.setItem(registryKey, JSON.stringify(models));
+                        addLog(`Removed ${modelName} from model registry`);
+                    } else {
+                        addLog(`Model ${modelName} not found in registry`);
+                    }
+                } catch (error) {
+                    addLog(`Error updating model registry: ${error}`, true);
+                }
+            }
+            
+            // Remove collision data
+            const collisionKey = `sappyverse_collision_${modelName}`;
+            if (localStorage.getItem(collisionKey)) {
+                localStorage.removeItem(collisionKey);
+                addLog(`Removed collision data for ${modelName}`);
+            }
+            
+            // Remove from all collisions registry
+            const allCollisionsKey = 'sappyverse_all_collisions';
+            const allCollisionsData = localStorage.getItem(allCollisionsKey);
+            if (allCollisionsData) {
+                try {
+                    const collisions = JSON.parse(allCollisionsData);
+                    if (collisions[modelName]) {
+                        delete collisions[modelName];
+                        localStorage.setItem(allCollisionsKey, JSON.stringify(collisions));
+                        addLog(`Removed ${modelName} from all collisions registry`);
+                    }
+                } catch (error) {
+                    addLog(`Error updating all collisions registry: ${error}`, true);
+                }
+            }
+            
+            showCurrentData();
+        }
+
+        function clearAllSappyverse() {
+            if (!confirm('This will clear ALL Sappyverse data from localStorage. Are you sure?')) {
+                return;
+            }
+            
+            addLog('Clearing ALL Sappyverse data...');
+            
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.includes('sappyverse')) {
+                    keysToRemove.push(key);
+                }
+            }
+            
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+                addLog(`Removed: ${key}`);
+            });
+            
+            if (keysToRemove.length === 0) {
+                addLog('No Sappyverse data found');
+            } else {
+                addLog(`Cleared ${keysToRemove.length} items from localStorage`);
+            }
+            
+            showCurrentData();
+        }
+
+        // Show current data on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            showCurrentData();
+            addLog('Page loaded - showing current localStorage data');
+        });
+    </script>
+</body>
+</html>

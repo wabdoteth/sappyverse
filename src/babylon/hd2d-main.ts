@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Collision Editor toggle
         document.getElementById('openCollisionEditor')?.addEventListener('click', () => {
             // Open collision editor in a new tab
-            window.open('/collision-editor-new.html', '_blank');
+            window.open('/collision-editor.html', '_blank');
         });
         
         // Time controls

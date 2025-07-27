@@ -3,6 +3,7 @@ import { SceneLoader } from '@babylonjs/core/Loading/sceneLoader';
 import '@babylonjs/loaders/glTF';
 import { CollisionEditor } from './CollisionEditor';
 import { CollisionSetup, ModelData, ColliderData } from './types';
+import { ModelPositioning } from '../utils/ModelPositioning';
 
 export class CollisionEditorFileHandler {
     private editor: CollisionEditor;
@@ -100,38 +101,52 @@ export class CollisionEditorFileHandler {
         
         // Create colliders from setup
         setup.colliders.forEach(data => {
-            const position = new Vector3(data.position._x, data.position._y, data.position._z);
-            this.editor.currentTool = data.type;
-            this.editor.placeCollider(position);
+            // Create the collider mesh directly without automatic lifting
+            const mesh = this.editor.sceneSetup.createColliderMesh(data.type, Vector3.Zero());
+            if (!mesh) return;
             
-            // Apply saved transform
-            const meshes = Array.from(this.editor.colliders.keys());
-            const lastMesh = meshes[meshes.length - 1];
-            if (lastMesh) {
-                lastMesh.rotation = new Vector3(data.rotation._x, data.rotation._y, data.rotation._z);
-                
-                // Calculate what scale factors would produce the saved dimensions
-                // First get the base dimensions of the mesh at scale 1
-                lastMesh.scaling = Vector3.One();
-                lastMesh.computeWorldMatrix(true);
-                const boundingInfo = lastMesh.getBoundingInfo();
-                const baseBounds = boundingInfo.boundingBox;
-                const baseWidth = baseBounds.maximumWorld.x - baseBounds.minimumWorld.x;
-                const baseHeight = baseBounds.maximumWorld.y - baseBounds.minimumWorld.y;
-                const baseDepth = baseBounds.maximumWorld.z - baseBounds.minimumWorld.z;
-                
-                // Calculate scale factors to achieve target dimensions
-                const scaleX = baseWidth > 0 ? data.scale._x / baseWidth : 1;
-                const scaleY = baseHeight > 0 ? data.scale._y / baseHeight : 1;
-                const scaleZ = baseDepth > 0 ? data.scale._z / baseDepth : 1;
-                
-                lastMesh.scaling = new Vector3(scaleX, scaleY, scaleZ);
-                
-                // Update the collider data
-                const colliderData = this.editor.colliders.get(lastMesh);
-                if (colliderData) {
-                    colliderData.scale = lastMesh.scaling.clone();
-                }
+            // Apply the saved position directly (it already has the correct Y position)
+            const position = new Vector3(data.position._x, data.position._y, data.position._z);
+            mesh.position = position;
+            
+            // Apply saved rotation
+            mesh.rotation = new Vector3(data.rotation._x, data.rotation._y, data.rotation._z);
+            
+            // Calculate what scale factors would produce the saved dimensions
+            // First get the base dimensions of the mesh at scale 1
+            mesh.scaling = Vector3.One();
+            mesh.computeWorldMatrix(true);
+            const boundingInfo = mesh.getBoundingInfo();
+            const baseBounds = boundingInfo.boundingBox;
+            const baseWidth = baseBounds.maximumWorld.x - baseBounds.minimumWorld.x;
+            const baseHeight = baseBounds.maximumWorld.y - baseBounds.minimumWorld.y;
+            const baseDepth = baseBounds.maximumWorld.z - baseBounds.minimumWorld.z;
+            
+            // Calculate scale factors to achieve target dimensions
+            const scaleX = baseWidth > 0 ? data.scale._x / baseWidth : 1;
+            const scaleY = baseHeight > 0 ? data.scale._y / baseHeight : 1;
+            const scaleZ = baseDepth > 0 ? data.scale._z / baseDepth : 1;
+            
+            mesh.scaling = new Vector3(scaleX, scaleY, scaleZ);
+            
+            // Create and store the collider data
+            const colliderData: ColliderData = {
+                type: data.type,
+                position: position.clone(),
+                rotation: mesh.rotation.clone(),
+                scale: mesh.scaling.clone(),
+                isWalkable: data.isWalkable || false
+            };
+            
+            // Store in the colliders map
+            this.editor.colliders.set(mesh, colliderData);
+            
+            // Make the mesh selectable
+            mesh.isPickable = true;
+            
+            // Add gizmo attachment observer
+            if (this.editor.gizmoManager) {
+                this.editor.gizmoManager.attachableMeshes = Array.from(this.editor.colliders.keys());
             }
         });
         
@@ -217,26 +232,16 @@ export class CollisionEditorFileHandler {
                 this.editor.loadedModel.scaling = modelData.scale ? 
                     modelData.scale.clone() : new Vector3(1, 1, 1);
                 
-                // Find the main mesh to compute bounds
-                let mainMesh = null;
-                const meshes = this.editor.loadedModel.getChildMeshes();
-                for (const mesh of meshes) {
-                    if (mesh.getTotalVertices && mesh.getTotalVertices() > 0) {
-                        mainMesh = mesh;
-                        break;
-                    }
-                }
+                // Find the main mesh and position model on ground using shared utility
+                const mainMesh = ModelPositioning.findMainMesh([this.editor.loadedModel]);
                 
-                // Adjust Y position to sit on ground
-                if (mainMesh) {
-                    mainMesh.computeWorldMatrix(true);
-                    const bounds = mainMesh.getBoundingInfo().boundingBox;
-                    const minY = bounds.minimumWorld.y;
-                    
-                    // Adjust Y position so bottom of model sits at Y=0
-                    if (minY !== 0) {
-                        this.editor.loadedModel.position.y = -minY;
-                    }
+                if (mainMesh && this.editor.loadedModel) {
+                    const yOffset = ModelPositioning.positionModelOnGround(
+                        this.editor.loadedModel,
+                        mainMesh,
+                        Vector3.Zero() // Target position is origin
+                    );
+                    console.log(`Model '${modelData.name}' positioned with Y offset: ${yOffset}`);
                 }
                 
                 // Make model non-pickable so it can't be selected/moved

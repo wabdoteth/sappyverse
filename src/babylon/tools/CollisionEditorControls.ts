@@ -8,6 +8,11 @@ export class CollisionEditorControls {
     private keys: { [key: string]: boolean } = {};
     private scaleConstraintsAdded: boolean = false;
     
+    // Smooth camera movement
+    private cameraVelocity = { forward: 0, right: 0, up: 0 };
+    private cameraAcceleration = 0.008;  // Moderate acceleration
+    private cameraDeceleration = 0.9;    // Higher friction
+    
     constructor(editor: CollisionEditor) {
         this.editor = editor;
     }
@@ -127,34 +132,53 @@ export class CollisionEditorControls {
     }
     
     private updateCameraMovement(): void {
-        const speed = 0.3;
         const camera = this.editor.sceneSetup.camera;
         
+        // Get input
+        const forward = (this.keys['w'] ? 1 : 0) - (this.keys['s'] ? 1 : 0);
+        const right = (this.keys['d'] ? 1 : 0) - (this.keys['a'] ? 1 : 0);
+        const up = (this.keys['shift'] ? 1 : 0) - (this.keys['control'] ? 1 : 0);
+        
+        // Apply acceleration
+        if (forward !== 0) {
+            this.cameraVelocity.forward += forward * this.cameraAcceleration;
+        } else {
+            this.cameraVelocity.forward *= this.cameraDeceleration;
+        }
+        
+        if (right !== 0) {
+            this.cameraVelocity.right += right * this.cameraAcceleration;
+        } else {
+            this.cameraVelocity.right *= this.cameraDeceleration;
+        }
+        
+        if (up !== 0) {
+            this.cameraVelocity.up += up * this.cameraAcceleration;
+        } else {
+            this.cameraVelocity.up *= this.cameraDeceleration;
+        }
+        
+        // Clamp velocities
+        const maxSpeed = 0.2;  // Reasonable max speed
+        this.cameraVelocity.forward = Math.max(-maxSpeed, Math.min(maxSpeed, this.cameraVelocity.forward));
+        this.cameraVelocity.right = Math.max(-maxSpeed, Math.min(maxSpeed, this.cameraVelocity.right));
+        this.cameraVelocity.up = Math.max(-maxSpeed, Math.min(maxSpeed, this.cameraVelocity.up));
+        
         // Get camera direction vectors
-        const forward = camera.getDirection(Vector3.Forward());
-        const right = camera.getDirection(Vector3.Right());
-        const up = Vector3.Up();
+        const forwardVec = camera.getDirection(Vector3.Forward());
+        const rightVec = camera.getDirection(Vector3.Right());
+        const upVec = Vector3.Up();
         
-        // Don't normalize or zero out Y - allow full 3D movement
+        // Apply movement
+        const deltaTime = this.editor.engine.getDeltaTime() / 16.0; // Normalize to 60fps
+        camera.position.addInPlace(forwardVec.scale(this.cameraVelocity.forward * deltaTime));
+        camera.position.addInPlace(rightVec.scale(this.cameraVelocity.right * deltaTime));
+        camera.position.addInPlace(upVec.scale(this.cameraVelocity.up * deltaTime));
         
-        if (this.keys['w']) {
-            camera.position.addInPlace(forward.scale(speed));
-        }
-        if (this.keys['s']) {
-            camera.position.subtractInPlace(forward.scale(speed));
-        }
-        if (this.keys['a']) {
-            camera.position.subtractInPlace(right.scale(speed));
-        }
-        if (this.keys['d']) {
-            camera.position.addInPlace(right.scale(speed));
-        }
-        if (this.keys['shift']) {
-            camera.position.addInPlace(up.scale(speed));
-        }
-        if (this.keys['control']) {
-            camera.position.subtractInPlace(up.scale(speed));
-        }
+        // Stop very small movements
+        if (Math.abs(this.cameraVelocity.forward) < 0.0001) this.cameraVelocity.forward = 0;
+        if (Math.abs(this.cameraVelocity.right) < 0.0001) this.cameraVelocity.right = 0;
+        if (Math.abs(this.cameraVelocity.up) < 0.0001) this.cameraVelocity.up = 0;
     }
     
     public setupScaleConstraints(): void {
