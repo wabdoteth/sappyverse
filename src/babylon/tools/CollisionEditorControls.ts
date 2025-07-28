@@ -223,8 +223,8 @@ export class CollisionEditorControls {
                                 break;
                             case 'floor':
                             case 'ramp':
-                                // Keep Y scale minimal for floor/ramp
-                                mesh.scaling.y = Math.max(0.1, Math.min(0.5, mesh.scaling.y));
+                                // Allow more flexible Y scaling for floors and ramps
+                                mesh.scaling.y = Math.max(0.1, mesh.scaling.y);
                                 break;
                         }
                         

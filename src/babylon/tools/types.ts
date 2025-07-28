@@ -1,6 +1,6 @@
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 
-export type ColliderType = 'box' | 'cylinder' | 'floor' | 'ramp';
+export type ColliderType = 'box' | 'cylinder' | 'ramp' | 'floor';
 
 export interface ColliderData {
     type: ColliderType;

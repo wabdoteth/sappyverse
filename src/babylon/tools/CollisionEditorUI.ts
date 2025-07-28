@@ -143,8 +143,8 @@ export class CollisionEditorUI {
         // Collider type buttons
         this.createColliderButton(colliderGrid, "Box [1]", 'box', 0, 0);
         this.createColliderButton(colliderGrid, "Cylinder [2]", 'cylinder', 0, 1);
-        this.createColliderButton(colliderGrid, "Floor [3]", 'floor', 1, 0);
-        this.createColliderButton(colliderGrid, "Ramp [4]", 'ramp', 1, 1);
+        this.createColliderButton(colliderGrid, "Ramp [3]", 'ramp', 1, 0);
+        this.createColliderButton(colliderGrid, "Floor [4]", 'floor', 1, 1);
         
         // Model panel - adjusted height
         const modelPanel = this.createFloatingPanel("300px", "160px", "20px", "400px");

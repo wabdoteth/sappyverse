@@ -256,6 +256,10 @@ export class HD2DSprite {
         this.texture.vOffset = 0;
     }
     
+    public get position(): Vector3 {
+        return this.mesh.position;
+    }
+    
     public setPosition(position: Vector3): void {
         this.mesh.position = position;
         

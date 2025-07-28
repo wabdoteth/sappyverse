@@ -228,7 +228,8 @@ export class CollisionEditorFileHandler {
             // Center the model and lock it
             if (this.editor.loadedModel) {
                 this.editor.loadedModel.position = new Vector3(0, 0, 0);
-                this.editor.loadedModel.rotation = new Vector3(0, 0, 0);
+                // Rotate 180 degrees on Y axis to match game orientation
+                this.editor.loadedModel.rotation = new Vector3(0, Math.PI, 0);
                 this.editor.loadedModel.scaling = modelData.scale ? 
                     modelData.scale.clone() : new Vector3(1, 1, 1);
                 

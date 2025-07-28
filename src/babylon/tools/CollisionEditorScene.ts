@@ -29,8 +29,8 @@ export class CollisionEditorScene {
         const scene = this.editor.scene;
         scene.clearColor = new Color4(0.1, 0.1, 0.15, 1);
         
-        // Camera
-        this.camera = new UniversalCamera('camera', new Vector3(0, 10, -20), scene);
+        // Camera - position in front of model (positive Z) instead of behind
+        this.camera = new UniversalCamera('camera', new Vector3(0, 10, 20), scene);
         this.camera.setTarget(Vector3.Zero());
         this.camera.attachControl(this.editor.canvas, true);
         

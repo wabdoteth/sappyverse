@@ -133,8 +133,20 @@ export class HD2DGame {
     private player: HD2DAnimatedSprite;
     private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
     private collisionCylinders: Array<{center: Vector3, radius: number, height: number}> = [];
-    private floorZones: Array<{bounds: {min: Vector3, max: Vector3}, heightMap: number[][], resolution: number}> = [];
+    private collisionRamps: Array<{
+        position: Vector3, 
+        size: Vector3, 
+        rotation: Vector3,
+        minHeight: number,
+        maxHeight: number
+    }> = [];
+    private collisionFloors: Array<{
+        position: Vector3,
+        size: Vector3,
+        height: number
+    }> = [];
     private playerCollisionMesh: Mesh | null = null; // Persistent collision mesh for player
+    private debugLoggingEnabled: boolean = false; // Disable debug logging by default
     
     // Input
     private keys: { [key: string]: boolean } = {};
@@ -338,10 +350,11 @@ export class HD2DGame {
         // Get player reference
         this.player = this.townScene.getPlayer();
         
-        // Get collision boxes, cylinders, and floor zones
+        // Get collision boxes and cylinders
         this.collisionBoxes = this.townScene.getCollisionBoxes();
         this.collisionCylinders = this.townScene.getCollisionCylinders();
-        this.floorZones = this.townScene.getFloorZones();
+        this.collisionRamps = this.townScene.getCollisionRamps();
+        this.collisionFloors = this.townScene.getCollisionFloors();
         
         // Create player collision mesh (invisible cylinder for player bounds)
         if (this.player) {
@@ -658,6 +671,15 @@ export class HD2DGame {
                 // Check if player height should be adjusted based on ground/objects
                 const adjustedPosition = this.checkGroundHeight(newPosition);
                 
+                // Debug: Log position change only when significant
+                if (this.debugLoggingEnabled && Math.abs(adjustedPosition.y - newPosition.y) > 0.01) {
+                    console.log('Adjusting player Y position:', {
+                        from: newPosition.y,
+                        to: adjustedPosition.y,
+                        delta: adjustedPosition.y - newPosition.y
+                    });
+                }
+                
                 this.player.setPosition(adjustedPosition);
                 
                 // Update camera target only if not in rotation mode
@@ -729,8 +751,29 @@ export class HD2DGame {
             }
         }
         
-        // Cylinder collisions are handled as solid obstacles
-        // Only floors and ramps are walkable surfaces
+        // Check cylinder collisions
+        for (const cylinder of this.collisionCylinders) {
+            // Calculate distance from player center to cylinder center in XZ plane
+            const dx = position.x - cylinder.center.x;
+            const dz = position.z - cylinder.center.z;
+            const distanceSquared = dx * dx + dz * dz;
+            
+            // Check if player is within cylinder radius (accounting for player's width)
+            const totalRadius = cylinder.radius + halfWidth;
+            if (distanceSquared < totalRadius * totalRadius) {
+                // Also check if player is within cylinder height bounds
+                const playerHeight = 1.5; // Approximate player height
+                const playerBottom = position.y;
+                const playerTop = position.y + playerHeight;
+                const cylinderBottom = cylinder.center.y - cylinder.height / 2;
+                const cylinderTop = cylinder.center.y + cylinder.height / 2;
+                
+                // Check if there's vertical overlap
+                if (playerBottom < cylinderTop && playerTop > cylinderBottom) {
+                    return true; // Collision detected
+                }
+            }
+        }
         
         // Check mesh collisions using precise mesh intersection
         if (this.playerCollisionMesh) {
@@ -777,60 +820,89 @@ export class HD2DGame {
     }
     
     private checkGroundHeight(position: Vector3): Vector3 {
-        // Player collision width
-        const spriteWidth = 3;
-        const playerCollisionWidth = (22 / 96) * spriteWidth;
-        const halfWidth = playerCollisionWidth / 2;
-        const defaultHeight = 0.6; // Default player Y when on ground
+        const defaultHeight = 0.6;
+        const newPosition = position.clone();
+        let groundHeight = defaultHeight;
         
-        let targetHeight = defaultHeight;
-        let foundElevation = false;
+        // Check if player is on a floor
+        for (const floor of this.collisionFloors) {
+            // Check if position is within floor bounds
+            const halfSizeX = floor.size.x / 2;
+            const halfSizeZ = floor.size.z / 2;
+            
+            if (position.x >= floor.position.x - halfSizeX && position.x <= floor.position.x + halfSizeX &&
+                position.z >= floor.position.z - halfSizeZ && position.z <= floor.position.z + halfSizeZ) {
+                
+                // Set ground height to floor height + default player height
+                groundHeight = floor.height + defaultHeight;
+                newPosition.y = groundHeight;
+                
+                // Found a floor, no need to check ramps
+                return newPosition;
+            }
+        }
         
-        // First check floor zones (walkable elevated/sloped areas)
-        for (const zone of this.floorZones) {
-            // Check if player is within this floor zone
-            if (position.x >= zone.bounds.min.x && position.x <= zone.bounds.max.x &&
-                position.z >= zone.bounds.min.z && position.z <= zone.bounds.max.z) {
+        // Check if player is on a ramp
+        for (const ramp of this.collisionRamps) {
+            // Check if position is within ramp bounds
+            const halfSize = new Vector3(ramp.size.x / 2, ramp.size.y / 2, ramp.size.z / 2);
+            
+            // For now, assume ramps are axis-aligned (we'll handle rotation later)
+            // Check X and Z bounds
+            if (position.x >= ramp.position.x - halfSize.x && position.x <= ramp.position.x + halfSize.x &&
+                position.z >= ramp.position.z - halfSize.z && position.z <= ramp.position.z + halfSize.z) {
                 
-                // Get height from height map
-                const cellWidth = (zone.bounds.max.x - zone.bounds.min.x) / zone.resolution;
-                const cellDepth = (zone.bounds.max.z - zone.bounds.min.z) / zone.resolution;
+                // Calculate height based on position on ramp
+                // Determine ramp direction based on rotation
+                let ratio = 0;
                 
-                const gridX = Math.floor((position.x - zone.bounds.min.x) / cellWidth);
-                const gridZ = Math.floor((position.z - zone.bounds.min.z) / cellDepth);
+                // Check primary rotation axis
+                if (Math.abs(ramp.rotation.y) < 0.1) {
+                    // Ramp aligned with Z axis (default)
+                    // REVERSED: Going from +Z to -Z (north to south) goes up
+                    ratio = 1 - ((position.z - (ramp.position.z - halfSize.z)) / ramp.size.z);
+                } else if (Math.abs(ramp.rotation.y - Math.PI/2) < 0.1 || Math.abs(ramp.rotation.y + Math.PI/2) < 0.1) {
+                    // Ramp rotated 90 degrees, aligned with X axis
+                    ratio = (position.x - (ramp.position.x - halfSize.x)) / ramp.size.x;
+                } else if (Math.abs(ramp.rotation.y - Math.PI) < 0.1) {
+                    // Ramp rotated 180 degrees (reversed Z)
+                    ratio = (position.z - (ramp.position.z - halfSize.z)) / ramp.size.z;
+                }
                 
-                if (gridX >= 0 && gridX <= zone.resolution && gridZ >= 0 && gridZ <= zone.resolution) {
-                    // Clamp to array bounds
-                    const clampedX = Math.min(gridX, zone.resolution);
-                    const clampedZ = Math.min(gridZ, zone.resolution);
-                    const floorHeight = zone.heightMap[clampedZ][clampedX]; // Fixed: [z][x] not [x][z]
-                    targetHeight = floorHeight + defaultHeight; // Add player offset
-                    foundElevation = true;
-                    break;
+                // For ramps, the "bottom" is actually at the lower edge, not the center
+                // So we need to adjust our height calculation
+                const rampBase = ramp.position.y - halfSize.y;
+                const rampTop = ramp.position.y + halfSize.y;
+                const rampHeight = rampBase + (rampTop - rampBase) * ratio;
+                
+                // Only apply if it's higher than current ground height
+                if (rampHeight > groundHeight) {
+                    groundHeight = rampHeight;
                 }
             }
         }
         
-        // Cylinders are now only used for collision, not for walking on
-        // Removed cylinder walking logic - cylinders should block movement, not be walkable
-        
-        // Smoothly adjust to target height
-        const newPosition = position.clone();
-        const heightDiff = targetHeight - position.y;
-        
-        if (Math.abs(heightDiff) > 0.01) {
-            // Smooth transition
-            if (heightDiff > 0) {
-                // Going up - faster
-                newPosition.y = position.y + Math.min(heightDiff, 0.3);
-            } else {
-                // Going down - slower
-                newPosition.y = position.y + Math.max(heightDiff, -0.2);
+        // Check if player is on a floor
+        for (const floor of this.collisionFloors) {
+            // Check if position is within floor bounds
+            const halfSizeX = floor.size.x / 2;
+            const halfSizeZ = floor.size.z / 2;
+            
+            if (position.x >= floor.position.x - halfSizeX && position.x <= floor.position.x + halfSizeX &&
+                position.z >= floor.position.z - halfSizeZ && position.z <= floor.position.z + halfSizeZ) {
+                
+                // Floor position.y is the base height where the floor sits
+                // floor.height is the heightmap offset that elevates the player
+                const totalFloorHeight = floor.position.y + floor.height;
+                
+                // Only apply if it's higher than current ground height
+                if (totalFloorHeight > groundHeight) {
+                    groundHeight = totalFloorHeight;
+                }
             }
-        } else {
-            newPosition.y = targetHeight;
         }
         
+        newPosition.y = groundHeight;
         return newPosition;
     }
     
@@ -1055,17 +1127,26 @@ export class HD2DGame {
         });
         console.groupEnd();
         
-        // Log floor zones
-        console.group('🟦 Floor Zones:', this.floorZones.length);
-        this.floorZones.forEach((zone, index) => {
-            console.log(`Floor Zone ${index}:`, {
-                type: zone.type || 'floor',
-                bounds: {
-                    min: `(${zone.bounds.min.x.toFixed(2)}, ${zone.bounds.min.y.toFixed(2)}, ${zone.bounds.min.z.toFixed(2)})`,
-                    max: `(${zone.bounds.max.x.toFixed(2)}, ${zone.bounds.max.y.toFixed(2)}, ${zone.bounds.max.z.toFixed(2)})`
-                },
-                heightMapSize: `${zone.heightMap.length}x${zone.heightMap[0]?.length || 0}`,
-                resolution: zone.resolution
+        // Log collision ramps
+        console.group('📐 Collision Ramps:', this.collisionRamps.length);
+        this.collisionRamps.forEach((ramp, index) => {
+            console.log(`Ramp ${index}:`, {
+                position: `(${ramp.position.x.toFixed(2)}, ${ramp.position.y.toFixed(2)}, ${ramp.position.z.toFixed(2)})`,
+                size: `(${ramp.size.x.toFixed(2)}, ${ramp.size.y.toFixed(2)}, ${ramp.size.z.toFixed(2)})`,
+                rotation: `(${ramp.rotation.x.toFixed(2)}, ${ramp.rotation.y.toFixed(2)}, ${ramp.rotation.z.toFixed(2)})`,
+                minHeight: ramp.minHeight.toFixed(2),
+                maxHeight: ramp.maxHeight.toFixed(2)
+            });
+        });
+        console.groupEnd();
+        
+        // Log collision floors
+        console.group('🟦 Collision Floors:', this.collisionFloors.length);
+        this.collisionFloors.forEach((floor, index) => {
+            console.log(`Floor ${index}:`, {
+                position: `(${floor.position.x.toFixed(2)}, ${floor.position.y.toFixed(2)}, ${floor.position.z.toFixed(2)})`,
+                size: `(${floor.size.x.toFixed(2)}, ${floor.size.y.toFixed(2)}, ${floor.size.z.toFixed(2)})`,
+                height: floor.height.toFixed(2)
             });
         });
         console.groupEnd();
@@ -1489,7 +1570,8 @@ export class HD2DGame {
         console.log('Creating debug visuals for HD2DGame...');
         console.log('Total collision boxes:', this.collisionBoxes.length);
         console.log('Total collision cylinders:', this.collisionCylinders.length);
-        console.log('Total floor zones:', this.floorZones.length);
+        console.log('Total collision ramps:', this.collisionRamps.length);
+        console.log('Total collision floors:', this.collisionFloors.length);
         
         // Skip creating debug boxes - HD2DTownScene already creates them as debugColliderBox
         // This avoids duplicate red boxes appearing
@@ -1520,13 +1602,13 @@ export class HD2DGame {
             this.playerDebugLine.position.x = this.player.position.x;
             this.playerDebugLine.position.z = this.player.position.z;
             
-            // Determine the ground height at player's position
-            let groundHeight = 0;
+            // Get the actual ground height from checkGroundHeight
+            const groundPosition = this.checkGroundHeight(this.player.position);
             
-            // Cylinders no longer affect ground height - removed cylinder ground check
-            
-            // Position debug line at the ground level beneath the player
-            this.playerDebugLine.position.y = groundHeight + 0.05;
+            // Position debug line at the actual ground level where the player should be
+            // Subtract the default player height offset to get the ground level
+            const defaultPlayerHeight = 0.6;
+            this.playerDebugLine.position.y = groundPosition.y - defaultPlayerHeight + 0.05;
         }
         
         // Also update the player collision mesh position to stay in sync

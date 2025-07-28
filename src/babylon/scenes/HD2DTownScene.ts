@@ -33,7 +33,18 @@ export class HD2DTownScene {
     private npcs: HD2DSprite[] = [];
     private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
     private collisionCylinders: Array<{center: Vector3, radius: number, height: number}> = [];
-    private floorZones: Array<{bounds: {min: Vector3, max: Vector3}, heightMap: number[][], resolution: number}> = [];
+    private collisionRamps: Array<{
+        position: Vector3,
+        size: Vector3,
+        rotation: Vector3,
+        minHeight: number,
+        maxHeight: number
+    }> = [];
+    private collisionFloors: Array<{
+        position: Vector3,
+        size: Vector3,
+        height: number
+    }> = [];
     private fountainWaterFlow: FountainWaterFlow;
     private createDebugVisualizations: boolean = true;
     
@@ -260,77 +271,64 @@ export class HD2DTownScene {
         debugCylinder.renderingGroupId = 2;
     }
     
-    private createDebugFloorZone(zone: any, color: Color3, colliderData?: any): void {
-        console.log('Creating debug floor zone:', {
-            type: colliderData?.type || 'floor',
-            bounds: {
-                min: `(${zone.bounds.min.x.toFixed(2)}, ${zone.bounds.min.y.toFixed(2)}, ${zone.bounds.min.z.toFixed(2)})`,
-                max: `(${zone.bounds.max.x.toFixed(2)}, ${zone.bounds.max.y.toFixed(2)}, ${zone.bounds.max.z.toFixed(2)})`
-            },
+    private createDebugRamp(position: Vector3, size: Vector3, rotation: Vector3, color: Color3): void {
+        console.log('Creating debug ramp:', {
+            position: `(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`,
+            size: `(${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`,
+            rotation: `(${rotation.x.toFixed(2)}, ${rotation.y.toFixed(2)}, ${rotation.z.toFixed(2)})`,
             color: color.toString()
         });
         
-        // For ramps, create an angled box to show the slope
-        if (colliderData && colliderData.type === 'ramp') {
-            const rampBox = CreateBox('debugRamp', {
-                width: colliderData.scale._x,
-                height: colliderData.scale._y,
-                depth: colliderData.scale._z
-            }, this.scene);
-            
-            // Use zone center position which already has the offset applied
-            rampBox.position = new Vector3(
-                (zone.bounds.min.x + zone.bounds.max.x) / 2,
-                (zone.bounds.min.y + zone.bounds.max.y) / 2,
-                (zone.bounds.min.z + zone.bounds.max.z) / 2
-            );
-            
-            // Apply rotation if specified
-            if (colliderData.rotation) {
-                rampBox.rotation = new Vector3(
-                    colliderData.rotation._x,
-                    colliderData.rotation._y,
-                    colliderData.rotation._z
-                );
-            }
-            
-            const debugMat = new StandardMaterial('debugRampMat', this.scene);
-            debugMat.wireframe = true;
-            debugMat.emissiveColor = color;
-            debugMat.disableLighting = true;
-            debugMat.alpha = 0.5;
-            
-            rampBox.material = debugMat;
-            rampBox.isPickable = false;
-            rampBox.renderingGroupId = 2;
-        } else {
-            // For floors, create a flat plane as before
-            const width = zone.bounds.max.x - zone.bounds.min.x;
-            const depth = zone.bounds.max.z - zone.bounds.min.z;
-            
-            const debugFloor = CreateGround('debugFloorZone', {
-                width: width,
-                height: depth,
-                subdivisions: zone.resolution
-            }, this.scene);
-            
-            debugFloor.position = new Vector3(
-                (zone.bounds.min.x + zone.bounds.max.x) / 2,
-                (zone.bounds.min.y + zone.bounds.max.y) / 2,
-                (zone.bounds.min.z + zone.bounds.max.z) / 2
-            );
-            
-            const debugMat = new StandardMaterial('debugFloorMat', this.scene);
-            debugMat.wireframe = true;
-            debugMat.emissiveColor = color;
-            debugMat.disableLighting = true;
-            debugMat.alpha = 0.5;
-            
-            debugFloor.material = debugMat;
-            debugFloor.isPickable = false;
-            debugFloor.renderingGroupId = 2;
-        }
+        const debugRamp = CreateBox('debugColliderRamp', {
+            width: size.x,
+            height: size.y,
+            depth: size.z
+        }, this.scene);
+        
+        debugRamp.position = position;
+        debugRamp.rotation = rotation;
+        
+        const debugMat = new StandardMaterial('debugRampMat', this.scene);
+        debugMat.wireframe = true;
+        debugMat.emissiveColor = color;
+        debugMat.disableLighting = true;
+        debugMat.alpha = 0.5;
+        
+        debugRamp.material = debugMat;
+        debugRamp.isPickable = false;
+        debugRamp.renderingGroupId = 2;
     }
+    
+    private createDebugFloor(position: Vector3, size: Vector3, height: number, color: Color3): void {
+        console.log('Creating debug floor:', {
+            position: `(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`,
+            size: `(${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`,
+            height: height.toFixed(2),
+            color: color.toString()
+        });
+        
+        const debugFloor = CreateBox('debugColliderFloor', {
+            width: size.x,
+            height: size.y,
+            depth: size.z
+        }, this.scene);
+        
+        // Position the debug floor at the actual floor height
+        debugFloor.position = position.clone();
+        debugFloor.position.y = height;
+        
+        const debugMat = new StandardMaterial('debugFloorMat', this.scene);
+        debugMat.wireframe = true;
+        debugMat.emissiveColor = color;
+        debugMat.disableLighting = true;
+        debugMat.alpha = 0.5;
+        
+        debugFloor.material = debugMat;
+        debugFloor.isPickable = false;
+        debugFloor.renderingGroupId = 2;
+    }
+    
+    
     
     private createTrees(): void {
         const treePositions = [
@@ -678,9 +676,11 @@ export class HD2DTownScene {
         // Add barrel near the fountain (fountain is at 0,0,0)
         await this.loadModelWithCollisions('barrel', new Vector3(2.5, 0, -2.5), new Vector3(1, 1, 1));
         
-        // Add blacksmith in back left corner
-        // Back left would be negative X and positive Z (assuming Z is forward)
-        await this.loadModelWithCollisions('blacksmith', new Vector3(-15, 0, 15), new Vector3(1, 1, 1));
+        // Add larger barrel at bottom left (negative X, negative Z)
+        await this.loadModelWithCollisions('barrel', new Vector3(-15, 0, -15), new Vector3(2, 2, 2));
+        
+        // Add blacksmith at specified position with 5x scale
+        await this.loadModelWithCollisions('blacksmith', new Vector3(-10, 0, 10), new Vector3(5, 5, 5));
     }
     
     private async loadModelCollisions(modelName: string, modelMesh: Mesh, position: Vector3, yOffset: number = 0, modelScale: Vector3 = new Vector3(1, 1, 1)): Promise<void> {
@@ -723,6 +723,7 @@ export class HD2DTownScene {
                         yOffset,
                         modelScale
                     );
+                    
                     
                     if (colliderData.type === 'box') {
                         // Create box collider with scaled dimensions
@@ -784,91 +785,63 @@ export class HD2DTownScene {
                             );
                         }
                         
-                    } else if (colliderData.type === 'floor' || colliderData.type === 'ramp') {
-                        // Only floors and ramps should create walkable zones
+                    } else if (colliderData.type === 'ramp') {
+                        // Create ramp collider with scaled dimensions
+                        const scaledWidth = colliderData.scale._x * modelScale.x;
+                        const scaledHeight = colliderData.scale._y * modelScale.y;
+                        const scaledDepth = colliderData.scale._z * modelScale.z;
                         
-                        // Create floor zone
-                        let heightMap;
-                        let resolution = 1;
+                        const rotation = new Vector3(
+                            colliderData.rotation._x,
+                            colliderData.rotation._y,
+                            colliderData.rotation._z
+                        );
                         
-                        if (colliderData.type === 'ramp') {
-                            // For ramps, create a height map that interpolates along the ramp
-                            resolution = 10; // Higher resolution for smooth ramp
-                            heightMap = [];
-                            
-                            // Calculate ramp direction based on rotation
-                            const rotY = colliderData.rotation ? colliderData.rotation._y : 0;
-                            const rotX = colliderData.rotation ? colliderData.rotation._x : 0;
-                            const rotZ = colliderData.rotation ? colliderData.rotation._z : 0;
-                            
-                            // Create height map grid
-                            for (let z = 0; z <= resolution; z++) {
-                                heightMap[z] = [];
-                                for (let x = 0; x <= resolution; x++) {
-                                    // Calculate position within the ramp (0 to 1)
-                                    const u = x / resolution;
-                                    const v = z / resolution;
-                                    
-                                    // Calculate height based on rotation
-                                    // Default ramp goes up along Z axis
-                                    let height = colliderPos.y;
-                                    
-                                    if (Math.abs(rotX) > 0.01) {
-                                        // Ramp tilted on X axis (front/back)
-                                        const t = v - 0.5; // -0.5 to 0.5
-                                        height += Math.tan(-rotX) * colliderData.scale._z * modelScale.z * t; // Inverted rotation
-                                    }
-                                    
-                                    if (Math.abs(rotZ) > 0.01) {
-                                        // Ramp tilted on Z axis (left/right)
-                                        const t = u - 0.5; // -0.5 to 0.5
-                                        height += Math.tan(-rotZ) * colliderData.scale._x * modelScale.x * t; // Inverted rotation
-                                    }
-                                    
-                                    heightMap[z][x] = height;
-                                }
-                            }
-                        } else {
-                            // For floors, create a 2x2 grid with uniform height
-                            const floorHeight = colliderData.height || colliderPos.y;
-                            heightMap = [
-                                [floorHeight, floorHeight],
-                                [floorHeight, floorHeight]
-                            ];
-                        }
+                        // Calculate min and max heights for the ramp
+                        // Simply use the bottom and top of the ramp box
+                        const rampMinHeight = colliderPos.y - scaledHeight / 2;
+                        const rampMaxHeight = colliderPos.y + scaledHeight / 2;
                         
-                        // Scale floor zone dimensions
-                        const scaledFloorWidth = colliderData.scale._x * modelScale.x;
-                        const scaledFloorHeight = colliderData.scale._y * modelScale.y;
-                        const scaledFloorDepth = colliderData.scale._z * modelScale.z;
-                        
-                        const floorZone = {
-                            bounds: {
-                                min: new Vector3(
-                                    colliderPos.x - scaledFloorWidth / 2,
-                                    colliderPos.y - scaledFloorHeight / 2,
-                                    colliderPos.z - scaledFloorDepth / 2
-                                ),
-                                max: new Vector3(
-                                    colliderPos.x + scaledFloorWidth / 2,
-                                    colliderPos.y + scaledFloorHeight / 2,
-                                    colliderPos.z + scaledFloorDepth / 2
-                                )
-                            },
-                            heightMap: heightMap,
-                            resolution: resolution,
-                            type: colliderData.type, // Store type for collision handling
-                            rotation: colliderData.rotation // Store rotation for collision calculations
-                        };
-                        
-                        this.floorZones.push(floorZone);
+                        this.collisionRamps.push({
+                            position: colliderPos,
+                            size: new Vector3(scaledWidth, scaledHeight, scaledDepth),
+                            rotation: rotation,
+                            minHeight: rampMinHeight,
+                            maxHeight: rampMaxHeight
+                        });
                         
                         // Debug visualization
                         if (this.createDebugVisualizations) {
-                            this.createDebugFloorZone(
-                                floorZone,
-                                colliderData.type === 'floor' ? new Color3(0, 0, 1) : new Color3(1, 0, 1),
-                                colliderData
+                            this.createDebugRamp(
+                                colliderPos,
+                                new Vector3(scaledWidth, scaledHeight, scaledDepth),
+                                rotation,
+                                new Color3(1, 0, 1) // Magenta
+                            );
+                        }
+                        
+                    } else if (colliderData.type === 'floor') {
+                        // Create floor collider with scaled dimensions
+                        const scaledWidth = colliderData.scale._x * modelScale.x;
+                        const scaledDepth = colliderData.scale._z * modelScale.z;
+                        
+                        // Get the floor height from collider data, scaled by model scale
+                        // The height should be the absolute Y position of the floor surface
+                        const floorHeight = colliderPos.y + (colliderData.height || 0) * modelScale.y;
+                        
+                        this.collisionFloors.push({
+                            position: colliderPos,
+                            size: new Vector3(scaledWidth, 0.1, scaledDepth),
+                            height: floorHeight
+                        });
+                        
+                        // Debug visualization
+                        if (this.createDebugVisualizations) {
+                            this.createDebugFloor(
+                                colliderPos,
+                                new Vector3(scaledWidth, 0.1, scaledDepth),
+                                floorHeight,
+                                new Color3(0, 0, 1) // Blue
                             );
                         }
                     }
@@ -976,8 +949,12 @@ export class HD2DTownScene {
         return this.collisionCylinders;
     }
     
-    public getFloorZones(): Array<{bounds: {min: Vector3, max: Vector3}, heightMap: number[][], resolution: number}> {
-        return this.floorZones;
+    public getCollisionRamps(): Array<{position: Vector3, size: Vector3, rotation: Vector3, minHeight: number, maxHeight: number}> {
+        return this.collisionRamps;
+    }
+    
+    public getCollisionFloors(): Array<{position: Vector3, size: Vector3, height: number}> {
+        return this.collisionFloors;
     }
     
     public getNPCs(): HD2DSprite[] {
