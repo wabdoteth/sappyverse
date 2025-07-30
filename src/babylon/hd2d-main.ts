@@ -86,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const bloomBtn = document.getElementById('toggleBloom') as HTMLButtonElement;
         if (bloomBtn) bloomBtn.textContent = 'Disable Bloom';
         
-        // Collision debug toggle
+        // Collision debug toggle - starts ON by default
         let collisionsVisible = true;
         document.getElementById('toggleCollisions')?.addEventListener('click', (e) => {
             collisionsVisible = !collisionsVisible;
@@ -94,6 +94,9 @@ document.addEventListener('DOMContentLoaded', () => {
             game.toggleCollisionDebug(collisionsVisible); // Also toggle the green wireframe colliders
             (e.target as HTMLButtonElement).textContent = collisionsVisible ? 'Hide Collision Debug' : 'Show Collision Debug';
         });
+        // Update initial button text to match ON state
+        const collisionBtn = document.getElementById('toggleCollisions') as HTMLButtonElement;
+        if (collisionBtn) collisionBtn.textContent = 'Hide Collision Debug';
         
         // HD-2D Outlines toggle
         let outlinesEnabled = false; // Off by default as per HD2DGame

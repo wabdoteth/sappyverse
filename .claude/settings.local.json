@@ -24,7 +24,9 @@
       "Bash(else echo \"No yarn.lock found\")",
       "Bash(dir \"C:\\Users\\Nabz4\\development\\sappyverse\\public\\textures\")",
       "Bash(dir:*)",
-      "Bash(rg:*)"
+      "Bash(rg:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }

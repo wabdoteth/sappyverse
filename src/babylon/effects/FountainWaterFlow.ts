@@ -4,7 +4,11 @@ import { Color4 } from '@babylonjs/core/Maths/math.color';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder';
+import { CreateRibbon } from '@babylonjs/core/Meshes/Builders/ribbonBuilder';
+import { CreateTube } from '@babylonjs/core/Meshes/Builders/tubeBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
+import { Effect } from '@babylonjs/core/Materials/effect';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import '@babylonjs/core/Particles/particleSystemComponent';
 
@@ -13,6 +17,7 @@ export class FountainWaterFlow {
     private waterParticles: ParticleSystem;
     private splashParticles: ParticleSystem;
     private waterStreamMesh: any;
+    private waterfallMesh: any;
     
     constructor(scene: Scene, fountainPosition: Vector3) {
         this.scene = scene;
@@ -26,73 +31,17 @@ export class FountainWaterFlow {
             
             // Create animated water stream mesh for HD-2D look
             this.createWaterStream(fountainPosition);
+            
+            // Create waterfall effect
+            this.createWaterfall(fountainPosition);
         } catch (error) {
             console.error('Error creating fountain water flow:', error);
         }
     }
     
     private createWaterFlow(fountainPos: Vector3): void {
-        // Create water flow particles
-        this.waterParticles = new ParticleSystem('fountainWater', 500, this.scene);
-        
-        // Create custom water drop texture
-        this.waterParticles.particleTexture = this.createWaterDropTexture();
-        
-        // Emission from top of fountain
-        this.waterParticles.emitter = fountainPos.clone();
-        this.waterParticles.emitter.y += 2.5; // Top of fountain pillar
-        
-        // Emit in a small area for focused stream
-        this.waterParticles.minEmitBox = new Vector3(-0.05, 0, -0.05);
-        this.waterParticles.maxEmitBox = new Vector3(0.05, 0, 0.05);
-        
-        // Particle life - shorter for continuous flow
-        this.waterParticles.minLifeTime = 0.8;
-        this.waterParticles.maxLifeTime = 1.2;
-        
-        // Size - varied for depth
-        this.waterParticles.minSize = 0.1;
-        this.waterParticles.maxSize = 0.2;
-        
-        // High emission rate for continuous stream
-        this.waterParticles.emitRate = 100;
-        
-        // Initial upward velocity (fountain spout)
-        this.waterParticles.minEmitPower = 4;
-        this.waterParticles.maxEmitPower = 5;
-        
-        // Direction - slightly upward spray
-        this.waterParticles.direction1 = new Vector3(-0.1, 1, -0.1);
-        this.waterParticles.direction2 = new Vector3(0.1, 1, 0.1);
-        
-        // Water colors - HD-2D style with transparency
-        this.waterParticles.color1 = new Color4(0.6, 0.8, 1, 0.8);
-        this.waterParticles.color2 = new Color4(0.8, 0.9, 1, 0.6);
-        this.waterParticles.colorDead = new Color4(1, 1, 1, 0);
-        
-        // Add size variation over lifetime
-        this.waterParticles.addSizeGradient(0, 0.1); // Start small
-        this.waterParticles.addSizeGradient(0.3, 0.2); // Grow
-        this.waterParticles.addSizeGradient(1, 0.05); // Shrink at end
-        
-        // Color gradient for more dynamic look
-        this.waterParticles.addColorGradient(0, new Color4(0.7, 0.85, 1, 0.9));
-        this.waterParticles.addColorGradient(0.5, new Color4(0.8, 0.9, 1, 0.7));
-        this.waterParticles.addColorGradient(1, new Color4(1, 1, 1, 0));
-        
-        // Gravity for realistic arc
-        this.waterParticles.gravity = new Vector3(0, -9.8, 0);
-        
-        // Slight turbulence
-        this.waterParticles.noiseStrength = new Vector3(0.1, 0, 0.1);
-        
-        // Render order
-        this.waterParticles.renderingGroupId = 2;
-        
-        // Blend mode for water transparency
-        this.waterParticles.blendMode = ParticleSystem.BLENDMODE_STANDARD;
-        
-        this.waterParticles.start();
+        // Disable water flow particles - keeping only splash effects
+        return;
     }
     
     private createSplashEffect(fountainPos: Vector3): void {
@@ -101,9 +50,9 @@ export class FountainWaterFlow {
         
         this.splashParticles.particleTexture = this.createSplashTexture();
         
-        // Emit from water surface
+        // Emit from lower bowl water surface
         this.splashParticles.emitter = fountainPos.clone();
-        this.splashParticles.emitter.y += 0.5; // Water surface level
+        this.splashParticles.emitter.y = 0.8; // Lower bowl water level
         
         // Wider emission area for splashes
         this.splashParticles.minEmitBox = new Vector3(-0.8, 0, -0.8);
@@ -128,62 +77,332 @@ export class FountainWaterFlow {
         this.splashParticles.direction1 = new Vector3(-1, 0.5, -1);
         this.splashParticles.direction2 = new Vector3(1, 2, 1);
         
-        // Splash colors - whiter and more transparent
-        this.splashParticles.color1 = new Color4(0.9, 0.95, 1, 0.6);
-        this.splashParticles.color2 = new Color4(1, 1, 1, 0.4);
+        // Splash colors - very light blue/white and more transparent
+        this.splashParticles.color1 = new Color4(0.95, 0.98, 1, 0.5);
+        this.splashParticles.color2 = new Color4(1, 1, 1, 0.3);
         
-        // Quick fade
-        this.splashParticles.addColorGradient(0, new Color4(1, 1, 1, 0.7));
+        // Quick fade to fully transparent white
+        this.splashParticles.addColorGradient(0, new Color4(0.98, 0.99, 1, 0.6));
         this.splashParticles.addColorGradient(1, new Color4(1, 1, 1, 0));
         
         // Light gravity
         this.splashParticles.gravity = new Vector3(0, -5, 0);
         
-        this.splashParticles.renderingGroupId = 2;
+        this.splashParticles.renderingGroupId = 1; // Same as fountain model
         this.splashParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
         
         this.splashParticles.start();
     }
     
     private createWaterStream(fountainPos: Vector3): void {
-        // Create a cylindrical mesh for the main water stream
-        const waterStream = CreateCylinder('waterStream', {
-            diameterTop: 0.15,
-            diameterBottom: 0.4,
-            height: 2,
-            tessellation: 16
-        }, this.scene);
+        // Disable water stream mesh as well
+        return;
+    }
+    
+    private createWaterfall(fountainPos: Vector3): void {
+        // Create shader for water streams
+        this.createWaterStreamShader();
         
-        waterStream.position = fountainPos.clone();
-        waterStream.position.y += 1.5; // Position between spout and water surface
+        // Create multiple arc streams
+        const numStreams = 4;
+        this.waterfallMesh = [];
         
-        // Create animated water material
-        const streamMat = new StandardMaterial('streamMat', this.scene);
-        streamMat.diffuseColor = new Color3(0.7, 0.85, 1);
-        streamMat.specularColor = new Color3(1, 1, 1);
-        streamMat.alpha = 0.4;
-        streamMat.specularPower = 128;
-        
-        // Add scrolling texture animation for flow effect
-        const streamTexture = this.createStreamTexture();
-        streamMat.diffuseTexture = streamTexture;
-        streamMat.diffuseTexture.hasAlpha = true;
-        streamMat.useAlphaFromDiffuseTexture = true;
-        
-        waterStream.material = streamMat;
-        waterStream.renderingGroupId = 1;
-        
-        // Animate texture V offset for flowing effect
-        this.scene.registerBeforeRender(() => {
-            if (streamTexture && streamTexture.vOffset !== undefined) {
-                streamTexture.vOffset += 0.01; // Scroll speed
-                if (streamTexture.vOffset > 1) {
-                    streamTexture.vOffset -= 1; // Reset when it reaches 1
-                }
+        for (let stream = 0; stream < numStreams; stream++) {
+            const angle = (stream / numStreams) * Math.PI * 2;
+            
+            // Create path for water arc
+            const path = [];
+            const segments = 50; // More segments for longer, smoother stream
+            
+            // Parameters for the arc - adjusted for higher fountain peak
+            const startHeight = 1.2; // Start from the actual peak (higher)
+            const maxHeight = 0.15; // Additional height for arc
+            const horizontalDistance = 0.3; // Even tighter radius to fit in bowl
+            const endHeight = 0.3; // End much lower to go deeper into the bowl
+            
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments;
+                
+                // Parabolic arc for realistic water flow
+                // Make arc wider at the top and midpoint
+                const topWidth = (1 - t) * 0.5; // 50% wider at start
+                const midWidth = Math.sin(t * Math.PI) * 0.4; // 40% wider at midpoint
+                const widthModifier = 1 + topWidth + midWidth;
+                const x = t * horizontalDistance * widthModifier;
+                
+                // Interpolate from start height to end height with arc
+                const baseY = startHeight + (endHeight - startHeight) * t;
+                const arcY = maxHeight * Math.sin(t * Math.PI);
+                const y = baseY + arcY - (t * t) * 0.5; // Stronger gravity effect
+                
+                // Position in world space
+                const worldX = fountainPos.x + Math.cos(angle) * x;
+                const worldY = fountainPos.y + y;
+                const worldZ = fountainPos.z + Math.sin(angle) * x;
+                
+                path.push(new Vector3(worldX, worldY, worldZ));
             }
-        });
+            
+            // Create ribbon for water stream (better for shader effects)
+            const ribbonPath = [];
+            const width = 0.08; // Narrower water stream
+            
+            // Create two parallel paths for ribbon
+            const leftPath = [];
+            const rightPath = [];
+            
+            for (let i = 0; i < path.length; i++) {
+                const point = path[i];
+                const tangent = i < path.length - 1 ? 
+                    path[i + 1].subtract(point).normalize() : 
+                    point.subtract(path[i - 1]).normalize();
+                
+                // Calculate perpendicular vector
+                const perp = new Vector3(-tangent.z, 0, tangent.x).normalize();
+                
+                leftPath.push(point.add(perp.scale(width / 2)));
+                rightPath.push(point.subtract(perp.scale(width / 2)));
+            }
+            
+            ribbonPath.push(leftPath);
+            ribbonPath.push(rightPath);
+            
+            // Create ribbon mesh
+            const waterStream = CreateRibbon(`waterStream${stream}`, {
+                pathArray: ribbonPath,
+                sideOrientation: 2, // Double sided
+                updatable: false,
+                closeArray: false,
+                closePath: false
+            }, this.scene);
+            
+            // Apply water shader material
+            const waterMat = new ShaderMaterial(`waterStreamMat${stream}`, this.scene, {
+                vertex: 'waterStreamShader',
+                fragment: 'waterStreamShader'
+            }, {
+                attributes: ['position', 'normal', 'uv'],
+                uniforms: ['worldViewProjection', 'world', 'time', 'flowSpeed', 'waterColor', 'transparency', 'cameraPosition']
+            });
+            
+            waterMat.setFloat('flowSpeed', 2.0);
+            waterMat.setColor3('waterColor', new Color3(0.7, 0.85, 1));
+            waterMat.setFloat('transparency', 0.8);
+            waterMat.backFaceCulling = false;
+            waterMat.alphaMode = 2; // ALPHA_COMBINE
+            waterMat.needAlphaBlending = () => true;
+            waterMat.separateCullingPass = true;
+            
+            waterStream.material = waterMat;
+            waterStream.renderingGroupId = 1; // Same as fountain model
+            waterStream.alphaIndex = 10; // Render after solid objects
+            
+            this.waterfallMesh.push(waterStream);
+        }
         
-        this.waterStreamMesh = waterStream;
+        // Animate shader time uniform
+        let time = 0;
+        this.scene.registerBeforeRender(() => {
+            time += this.scene.getEngine().getDeltaTime() * 0.001;
+            this.waterfallMesh.forEach((mesh, index) => {
+                const mat = mesh.material as ShaderMaterial;
+                mat.setFloat('time', time);
+                if (this.scene.activeCamera) {
+                    mat.setVector3('cameraPosition', this.scene.activeCamera.position);
+                }
+            });
+        });
+    }
+    
+    private createWaterStreamShader(): void {
+        // Vertex shader
+        Effect.ShadersStore['waterStreamShaderVertexShader'] = `
+            precision highp float;
+            
+            attribute vec3 position;
+            attribute vec3 normal;
+            attribute vec2 uv;
+            
+            uniform mat4 worldViewProjection;
+            uniform mat4 world;
+            uniform float time;
+            
+            varying vec2 vUV;
+            varying vec3 vPositionW;
+            varying vec3 vNormalW;
+            varying float vFlow;
+            
+            void main() {
+                // Add subtle wave motion
+                vec3 pos = position;
+                float wave = sin(uv.x * 10.0 + time * 2.0) * 0.01;
+                pos.y += wave;
+                
+                gl_Position = worldViewProjection * vec4(pos, 1.0);
+                
+                vPositionW = vec3(world * vec4(position, 1.0));
+                
+                // Calculate normal (for ribbon, normal might need adjustment)
+                vec3 n = normal;
+                if (length(normal) < 0.1) {
+                    n = vec3(0.0, 1.0, 0.0); // Default up normal if missing
+                }
+                vNormalW = normalize(vec3(world * vec4(n, 0.0)));
+                
+                vUV = uv;
+                vFlow = uv.x + time;
+            }
+        `;
+        
+        // Fragment shader
+        Effect.ShadersStore['waterStreamShaderFragmentShader'] = `
+            precision highp float;
+            
+            uniform vec3 waterColor;
+            uniform float transparency;
+            uniform float time;
+            uniform float flowSpeed;
+            uniform vec3 cameraPosition;
+            
+            varying vec2 vUV;
+            varying vec3 vPositionW;
+            varying vec3 vNormalW;
+            varying float vFlow;
+            
+            void main() {
+                // Flowing water effect along the stream
+                float flowPattern = fract(vUV.x * 5.0 - time * flowSpeed);
+                
+                // Create water bands/streams
+                float band1 = smoothstep(0.3, 0.4, flowPattern) * smoothstep(0.6, 0.5, flowPattern);
+                float band2 = smoothstep(0.0, 0.1, flowPattern) * smoothstep(0.3, 0.2, flowPattern);
+                float band3 = smoothstep(0.6, 0.7, flowPattern) * smoothstep(0.9, 0.8, flowPattern);
+                float bands = band1 + band2 + band3;
+                
+                // Add some noise/turbulence
+                float noise = sin(vUV.x * 40.0 + time * 3.0) * sin(vUV.y * 30.0 - time * 2.0) * 0.1;
+                
+                // Edge fade for smooth water stream edges
+                float edgeFade = smoothstep(0.0, 0.15, vUV.y) * smoothstep(1.0, 0.85, vUV.y);
+                
+                // Create transparency variation
+                float waterAlpha = 0.3 + bands * 0.4 + noise;
+                waterAlpha *= edgeFade;
+                
+                // Water color with variations
+                vec3 lightWater = vec3(0.9, 0.95, 1.0);
+                vec3 deepWater = vec3(0.7, 0.85, 0.95);
+                vec3 finalColor = mix(deepWater, lightWater, bands + noise);
+                
+                // Add shimmer
+                float shimmer = sin(vFlow * 20.0) * 0.1 + 0.9;
+                finalColor *= shimmer;
+                
+                // Final alpha
+                float alpha = waterAlpha * transparency;
+                
+                // Make sure we have some minimum visibility
+                alpha = max(alpha, 0.2 * edgeFade);
+                
+                gl_FragColor = vec4(finalColor, alpha);
+            }
+        `;
+    }
+    
+    private createFlowingWaterTexture(): Texture {
+        const width = 256;
+        const height = 64;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+        
+        // Create flowing water pattern
+        const gradient = ctx.createLinearGradient(0, 0, width, 0);
+        gradient.addColorStop(0, 'rgba(200, 230, 255, 0)');
+        gradient.addColorStop(0.1, 'rgba(200, 230, 255, 0.8)');
+        gradient.addColorStop(0.3, 'rgba(230, 245, 255, 1)');
+        gradient.addColorStop(0.5, 'rgba(200, 230, 255, 0.8)');
+        gradient.addColorStop(0.7, 'rgba(230, 245, 255, 1)');
+        gradient.addColorStop(0.9, 'rgba(200, 230, 255, 0.8)');
+        gradient.addColorStop(1, 'rgba(200, 230, 255, 0)');
+        
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+        
+        // Add some streak details
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 5; i++) {
+            ctx.beginPath();
+            ctx.moveTo(i * 50, 0);
+            ctx.lineTo(i * 50 + 20, height);
+            ctx.stroke();
+        }
+        
+        const texture = new Texture(canvas.toDataURL(), this.scene, false, true, Texture.TRILINEAR_SAMPLINGMODE);
+        texture.wrapU = Texture.WRAP_ADDRESSMODE;
+        texture.wrapV = Texture.WRAP_ADDRESSMODE;
+        
+        return texture;
+    }
+    
+    private createWaterfallShader(): void {
+        // Vertex shader
+        Effect.ShadersStore['waterfallShaderVertexShader'] = `
+            precision highp float;
+            
+            attribute vec3 position;
+            attribute vec3 normal;
+            attribute vec2 uv;
+            
+            uniform mat4 worldViewProjection;
+            uniform float time;
+            
+            varying vec2 vUV;
+            varying float vFlow;
+            
+            void main() {
+                vUV = uv;
+                vFlow = position.y + time;
+                gl_Position = worldViewProjection * vec4(position, 1.0);
+            }
+        `;
+        
+        // Fragment shader
+        Effect.ShadersStore['waterfallShaderFragmentShader'] = `
+            precision highp float;
+            
+            uniform vec3 waterColor;
+            uniform float opacity;
+            uniform float time;
+            uniform float flowSpeed;
+            
+            varying vec2 vUV;
+            varying float vFlow;
+            
+            void main() {
+                // Animated flow pattern
+                float flow = fract(vFlow * flowSpeed);
+                
+                // Create water streaks
+                float streak1 = sin(vUV.x * 10.0 + time * 3.0) * 0.5 + 0.5;
+                float streak2 = sin(vUV.x * 15.0 - time * 2.0) * 0.5 + 0.5;
+                float streaks = (streak1 + streak2) * 0.5;
+                
+                // Fade edges
+                float edgeFade = smoothstep(0.0, 0.1, vUV.x) * smoothstep(1.0, 0.9, vUV.x);
+                
+                // Combine effects
+                float alpha = opacity * edgeFade * (0.7 + streaks * 0.3);
+                alpha *= (0.8 + flow * 0.2);
+                
+                // Slight color variation
+                vec3 finalColor = waterColor * (0.9 + streaks * 0.1);
+                
+                gl_FragColor = vec4(finalColor, alpha);
+            }
+        `;
     }
     
     private createWaterDropTexture(): Texture {
@@ -267,11 +486,25 @@ export class FountainWaterFlow {
             if (this.waterStreamMesh) {
                 this.waterStreamMesh.setEnabled(true);
             }
+            if (this.waterfallMesh) {
+                if (Array.isArray(this.waterfallMesh)) {
+                    this.waterfallMesh.forEach(mesh => mesh.setEnabled(true));
+                } else {
+                    this.waterfallMesh.setEnabled(true);
+                }
+            }
         } else {
             this.waterParticles?.stop();
             this.splashParticles?.stop();
             if (this.waterStreamMesh) {
                 this.waterStreamMesh.setEnabled(false);
+            }
+            if (this.waterfallMesh) {
+                if (Array.isArray(this.waterfallMesh)) {
+                    this.waterfallMesh.forEach(mesh => mesh.setEnabled(false));
+                } else {
+                    this.waterfallMesh.setEnabled(false);
+                }
             }
         }
     }
@@ -280,5 +513,12 @@ export class FountainWaterFlow {
         this.waterParticles?.dispose();
         this.splashParticles?.dispose();
         this.waterStreamMesh?.dispose();
+        if (this.waterfallMesh) {
+            if (Array.isArray(this.waterfallMesh)) {
+                this.waterfallMesh.forEach(mesh => mesh.dispose());
+            } else {
+                this.waterfallMesh.dispose();
+            }
+        }
     }
 }

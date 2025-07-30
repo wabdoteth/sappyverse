@@ -130,21 +130,8 @@ export class HD2DGame {
     // Game objects
     private townScene: HD2DTownScene;
     private player: HD2DAnimatedSprite;
-    private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
-    private collisionCylinders: Array<{center: Vector3, radius: number, height: number}> = [];
-    private collisionRamps: Array<{
-        position: Vector3, 
-        size: Vector3, 
-        rotation: Vector3,
-        minHeight: number,
-        maxHeight: number
-    }> = [];
-    private collisionFloors: Array<{
-        position: Vector3,
-        size: Vector3,
-        height: number
-    }> = [];
-    private playerCollisionMesh: Mesh | null = null; // Persistent collision mesh for player
+    // Collision meshes from the new Babylon collision system
+    private collisionMeshes: Mesh[] = [];
     private debugLoggingEnabled: boolean = false; // Disable debug logging by default
     
     // Input
@@ -153,7 +140,6 @@ export class HD2DGame {
     private isRotatingCamera: boolean = false; // Flag to disable target updates during rotation
     
     // Debug
-    private debugMeshes: Mesh[] = [];
     private playerDebugLine: Mesh | null = null;
     private outlineEnabled: boolean = false;
     
@@ -339,28 +325,19 @@ export class HD2DGame {
         // Get player reference
         this.player = this.townScene.getPlayer();
         
-        // Get collision boxes and cylinders
-        this.collisionBoxes = this.townScene.getCollisionBoxes();
-        this.collisionCylinders = this.townScene.getCollisionCylinders();
-        this.collisionRamps = this.townScene.getCollisionRamps();
-        this.collisionFloors = this.townScene.getCollisionFloors();
+        // Enable collision checking on player sprite
+        if (this.player && this.player.mesh) {
+            this.player.mesh.checkCollisions = true;
+            this.player.mesh.ellipsoid = new Vector3(0.3, 0.9, 0.3); // Player collision ellipsoid
+            console.log('Enabled collision checking on player sprite');
+        }
         
-        // Create player collision mesh (invisible cylinder for player bounds)
+        // Get collision meshes from the new system
+        this.collisionMeshes = this.townScene.getCollisionMeshes();
+        console.log(`Retrieved ${this.collisionMeshes.length} collision meshes from town scene`);
+        
+        // Focus camera on player
         if (this.player) {
-            const spriteWidth = 3;
-            const playerCollisionWidth = (22 / 96) * spriteWidth;
-            
-            this.playerCollisionMesh = CreateCylinder('playerCollisionMesh', {
-                diameter: playerCollisionWidth,
-                height: 1.8,
-                tessellation: 8
-            }, this.scene);
-            
-            this.playerCollisionMesh.position = this.player.position.clone();
-            this.playerCollisionMesh.isVisible = false; // Invisible
-            this.playerCollisionMesh.isPickable = false;
-            
-            // Focus camera on player
             this.mainCamera.target = this.player.position;
         }
         
@@ -594,7 +571,7 @@ export class HD2DGame {
     }
     
     private update(): void {
-        if (!this.player) return;
+        if (!this.player || !this.player.mesh) return;
         
         const deltaTime = this.engine.getDeltaTime() / 1000;
         
@@ -617,7 +594,7 @@ export class HD2DGame {
             moveZ *= factor;
         }
         
-        // Apply movement with separate X and Z collision checks
+        // Apply movement using Babylon's collision system
         if (moveX !== 0 || moveZ !== 0) {
             const movement = new Vector3(
                 moveX * this.moveSpeed * deltaTime,
@@ -625,75 +602,41 @@ export class HD2DGame {
                 moveZ * this.moveSpeed * deltaTime
             );
             
-            let canMoveX = true;
-            let canMoveZ = true;
+            // First, check ground height at current position
+            const currentGroundPos = this.checkGroundHeight(this.player.position);
+            const groundDelta = currentGroundPos.y - this.player.position.y;
             
-            // Check X movement separately
-            if (moveX !== 0) {
-                const testPos = this.player.position.add(new Vector3(movement.x, 0, 0));
-                if (this.checkCollision(testPos)) {
-                    canMoveX = false;
-                }
+            // Include ground height adjustment in movement
+            movement.y = groundDelta;
+            
+            // Use Babylon's moveWithCollisions for collision detection
+            this.player.mesh.moveWithCollisions(movement);
+            
+            // Update player position from mesh position
+            this.player.position.copyFrom(this.player.mesh.position);
+            
+            // Update camera target only if not in rotation mode
+            if (!this.isRotatingCamera) {
+                // Update camera to follow player's position including Y changes
+                this.mainCamera.target = this.player.position.clone();
+                // Optionally adjust camera height to follow player
+                const cameraHeight = 15 + (this.player.position.y - 0.6) * 0.5; // Partial follow
+                this.mainCamera.position.y = cameraHeight;
             }
             
-            // Check Z movement separately
-            if (moveZ !== 0) {
-                const testPos = this.player.position.add(new Vector3(0, 0, movement.z));
-                if (this.checkCollision(testPos)) {
-                    canMoveZ = false;
-                }
-            }
-            
-            // Apply movement only for allowed directions
-            const finalMovement = new Vector3(
-                canMoveX ? movement.x : 0,
-                0,
-                canMoveZ ? movement.z : 0
-            );
-            
-            if (finalMovement.x !== 0 || finalMovement.z !== 0) {
-                const newPosition = this.player.position.add(finalMovement);
-                
-                // Check if player height should be adjusted based on ground/objects
-                const adjustedPosition = this.checkGroundHeight(newPosition);
-                
-                // Debug: Log position change only when significant
-                if (this.debugLoggingEnabled && Math.abs(adjustedPosition.y - newPosition.y) > 0.01) {
-                    console.log('Adjusting player Y position:', {
-                        from: newPosition.y,
-                        to: adjustedPosition.y,
-                        delta: adjustedPosition.y - newPosition.y
-                    });
-                }
-                
-                this.player.setPosition(adjustedPosition);
-                
-                // Update camera target only if not in rotation mode
-                if (!this.isRotatingCamera) {
-                    // Update camera to follow player's position including Y changes
-                    this.mainCamera.target = this.player.position.clone();
-                    // Optionally adjust camera height to follow player
-                    const cameraHeight = 15 + (this.player.position.y - 0.6) * 0.5; // Partial follow
-                    this.mainCamera.position.y = cameraHeight;
-                }
-                
-                // Update sprite direction based on actual movement
-                this.updateSpriteDirection(
-                    canMoveX ? moveX : 0,
-                    canMoveZ ? moveZ : 0
-                );
-                this.player.setMoving(true);
-            } else {
-                this.player.setMoving(false);
-            }
+            // Update sprite direction
+            this.updateSpriteDirection(moveX, moveZ);
+            this.player.setMoving(true);
         } else {
             this.player.setMoving(false);
             
             // Even when not moving, check if player should maintain height
-            const currentPos = this.player.position;
-            const adjustedPosition = this.checkGroundHeight(currentPos);
-            if (Math.abs(adjustedPosition.y - currentPos.y) > 0.01) {
-                this.player.setPosition(adjustedPosition);
+            const adjustedPosition = this.checkGroundHeight(this.player.position);
+            if (Math.abs(adjustedPosition.y - this.player.position.y) > 0.01) {
+                // Move to maintain ground height
+                const heightMovement = new Vector3(0, adjustedPosition.y - this.player.position.y, 0);
+                this.player.mesh.moveWithCollisions(heightMovement);
+                this.player.position.copyFrom(this.player.mesh.position);
             }
         }
     }
@@ -720,163 +663,56 @@ export class HD2DGame {
         this.player.setMoving(true, direction);
     }
     
-    private checkCollision(position: Vector3): boolean {
-        // Player collision based on actual character width (22/96 of sprite width)
-        const spriteWidth = 3; // Updated player sprite width
-        const playerCollisionWidth = (22 / 96) * spriteWidth; // ~0.6875 units
-        const halfWidth = playerCollisionWidth / 2;
-        
-        // Check bounding box collisions
-        for (const box of this.collisionBoxes) {
-            // Check collision with no padding - exact collision when character touches
-            if (position.x + halfWidth > box.min.x && 
-                position.x - halfWidth < box.max.x &&
-                position.z > box.min.z && 
-                position.z < box.max.z) {
-                return true; // Collision detected
-            }
-        }
-        
-        // Check cylinder collisions
-        for (const cylinder of this.collisionCylinders) {
-            // Calculate distance from player center to cylinder center in XZ plane
-            const dx = position.x - cylinder.center.x;
-            const dz = position.z - cylinder.center.z;
-            const distanceSquared = dx * dx + dz * dz;
-            
-            // Check if player is within cylinder radius (accounting for player's width)
-            const totalRadius = cylinder.radius + halfWidth;
-            if (distanceSquared < totalRadius * totalRadius) {
-                // Also check if player is within cylinder height bounds
-                const playerHeight = 1.5; // Approximate player height
-                const playerBottom = position.y;
-                const playerTop = position.y + playerHeight;
-                const cylinderBottom = cylinder.center.y - cylinder.height / 2;
-                const cylinderTop = cylinder.center.y + cylinder.height / 2;
-                
-                // Check if there's vertical overlap
-                if (playerBottom < cylinderTop && playerTop > cylinderBottom) {
-                    return true; // Collision detected
-                }
-            }
-        }
-        
-        // Check mesh collisions using precise mesh intersection
-        if (this.playerCollisionMesh) {
-            // Update player collision mesh position to test position
-            this.playerCollisionMesh.position.copyFrom(position);
-            // Use a fixed offset from the player's actual Y position for consistency
-            this.playerCollisionMesh.position.y = position.y; // Keep collision at same Y as player
-            this.playerCollisionMesh.computeWorldMatrix(true);
-            
-            // Check against all meshes with collision enabled
-            for (const mesh of this.scene.meshes) {
-                if (mesh.checkCollisions && mesh.isEnabled() && mesh.isVisible) {
-                    // Skip player's own mesh, shadows, debug meshes, and the collision mesh itself
-                    if (mesh === this.player.mesh || mesh.name.includes('_shadow') || 
-                        mesh.name.includes('Debug') || mesh.name.includes('_collider') ||
-                        mesh === this.playerCollisionMesh) {
-                        continue;
-                    }
-                    
-                    // First do a quick bounding box check for performance
-                    mesh.computeWorldMatrix(true);
-                    const meshBounds = mesh.getBoundingInfo().boundingBox;
-                    const playerBounds = this.playerCollisionMesh.getBoundingInfo().boundingBox;
-                    
-                    // Quick AABB check - if bounding boxes don't overlap, skip precise check
-                    if (playerBounds.maximumWorld.x < meshBounds.minimumWorld.x || 
-                        playerBounds.minimumWorld.x > meshBounds.maximumWorld.x ||
-                        playerBounds.maximumWorld.z < meshBounds.minimumWorld.z || 
-                        playerBounds.minimumWorld.z > meshBounds.maximumWorld.z) {
-                        continue; // Bounding boxes don't overlap
-                    }
-                    
-                    // Now do precise mesh intersection
-                    // The 'true' parameter enables precise intersection testing
-                    if (this.playerCollisionMesh.intersectsMesh(mesh, true)) {
-                        
-                        return true; // Collision detected
-                    }
-                }
-            }
-        }
-        
-        return false;
-    }
     
     private checkGroundHeight(position: Vector3): Vector3 {
         const defaultHeight = 0.6;
         const newPosition = position.clone();
         let groundHeight = defaultHeight;
         
-        // Check if player is on a floor
-        for (const floor of this.collisionFloors) {
-            // Check if position is within floor bounds
-            const halfSizeX = floor.size.x / 2;
-            const halfSizeZ = floor.size.z / 2;
+        // Check collision meshes for floor and ramp metadata
+        for (const mesh of this.collisionMeshes) {
+            if (!mesh.isEnabled() || !mesh.metadata) continue;
             
-            if (position.x >= floor.position.x - halfSizeX && position.x <= floor.position.x + halfSizeX &&
-                position.z >= floor.position.z - halfSizeZ && position.z <= floor.position.z + halfSizeZ) {
-                
-                // Set ground height to floor height + default player height
-                groundHeight = floor.height + defaultHeight;
-                newPosition.y = groundHeight;
-                
-                // Found a floor, no need to check ramps
-                return newPosition;
-            }
-        }
-        
-        // Check if player is on a ramp
-        for (const ramp of this.collisionRamps) {
-            // Check if position is within ramp bounds
-            const halfSize = new Vector3(ramp.size.x / 2, ramp.size.y / 2, ramp.size.z / 2);
-            
-            // Transform player position to ramp's local space to check bounds
-            const localPos = position.subtract(ramp.position);
-            const cos = Math.cos(-ramp.rotation.y);
-            const sin = Math.sin(-ramp.rotation.y);
-            const localX = localPos.x * cos - localPos.z * sin;
-            const localZ = localPos.x * sin + localPos.z * cos;
-            
-            // Check if we're within the ramp's local bounds
-            if (Math.abs(localX) <= halfSize.x && Math.abs(localZ) <= halfSize.z) {
-                
-                // Calculate height based on position on ramp
-                // Calculate ratio based on local Z position (ramps go up along local Z axis)
-                let ratio = (localZ + halfSize.z) / ramp.size.z;
-                ratio = Math.max(0, Math.min(1, ratio)); // Clamp between 0 and 1
-                
-                // For ramps, the "bottom" is actually at the lower edge, not the center
-                // So we need to adjust our height calculation
-                const rampBase = ramp.position.y - halfSize.y;
-                const rampTop = ramp.position.y + halfSize.y;
-                const rampHeight = rampBase + (rampTop - rampBase) * ratio;
-                
-                // Only apply if it's higher than current ground height
-                if (rampHeight > groundHeight) {
-                    groundHeight = rampHeight;
+            // Check floors
+            if (mesh.metadata.type === 'floor') {
+                const bounds = mesh.getBoundingInfo().boundingBox;
+                if (position.x >= bounds.minimumWorld.x && position.x <= bounds.maximumWorld.x &&
+                    position.z >= bounds.minimumWorld.z && position.z <= bounds.maximumWorld.z) {
+                    // The floor mesh is already positioned at the correct height
+                    // Place the player on top of the floor (accounting for floor thickness)
+                    const floorTop = mesh.position.y + 0.05; // Half of floor thickness (0.1)
+                    const floorHeight = floorTop + defaultHeight;
+                    if (floorHeight > groundHeight) {
+                        groundHeight = floorHeight;
+                    }
                 }
             }
-        }
-        
-        // Check if player is on a floor
-        for (const floor of this.collisionFloors) {
-            // Check if position is within floor bounds
-            const halfSizeX = floor.size.x / 2;
-            const halfSizeZ = floor.size.z / 2;
             
-            if (position.x >= floor.position.x - halfSizeX && position.x <= floor.position.x + halfSizeX &&
-                position.z >= floor.position.z - halfSizeZ && position.z <= floor.position.z + halfSizeZ) {
+            // Check ramps
+            else if (mesh.metadata.type === 'ramp') {
+                const bounds = mesh.getBoundingInfo().boundingBox;
+                const meshSize = bounds.maximumWorld.subtract(bounds.minimumWorld);
+                const halfSize = meshSize.scale(0.5);
                 
-                // Floor position.y is the base height where the floor sits
-                // floor.height is the heightmap offset that elevates the player
-                const totalFloorHeight = floor.position.y + floor.height;
+                // Transform player position to ramp's local space
+                const localPos = position.subtract(mesh.position);
+                const cos = Math.cos(-mesh.rotation.y);
+                const sin = Math.sin(-mesh.rotation.y);
+                const localX = localPos.x * cos - localPos.z * sin;
+                const localZ = localPos.x * sin + localPos.z * cos;
                 
-                // Only apply if it's higher than current ground height
-                if (totalFloorHeight > groundHeight) {
-                    groundHeight = totalFloorHeight;
+                // Check if we're within the ramp's local bounds
+                if (Math.abs(localX) <= halfSize.x && Math.abs(localZ) <= halfSize.z) {
+                    // Calculate height based on position on ramp
+                    let ratio = (localZ + halfSize.z) / meshSize.z;
+                    ratio = Math.max(0, Math.min(1, ratio));
+                    
+                    const rampHeight = mesh.metadata.minHeight + 
+                        (mesh.metadata.maxHeight - mesh.metadata.minHeight) * ratio + defaultHeight;
+                    
+                    if (rampHeight > groundHeight) {
+                        groundHeight = rampHeight;
+                    }
                 }
             }
         }
@@ -1064,11 +900,14 @@ export class HD2DGame {
     }
     
     public toggleDebugVisuals(visible: boolean): void {
-        // Toggle visibility of all debug meshes
-        this.debugMeshes.forEach(mesh => {
-            mesh.setEnabled(visible);
-        });
+        // Use the new visualization system
+        if (this.townScene) {
+            this.townScene.setDebugVisualizationsEnabled(visible);
+            const visualizer = this.townScene.getCollisionVisualizer();
+            console.log(visualizer.getDebugInfo());
+        }
         
+        // Toggle player debug line
         if (this.playerDebugLine) {
             this.playerDebugLine.setEnabled(visible);
         }
@@ -1082,96 +921,58 @@ export class HD2DGame {
     private logAllColliders(): void {
         console.group('=== ALL COLLIDERS AND DEBUG OBJECTS ===');
         
-        // Log collision boxes
-        console.group('📦 Collision Boxes:', this.collisionBoxes.length);
-        this.collisionBoxes.forEach((box, index) => {
-            console.log(`Box ${index}:`, {
-                min: `(${box.min.x.toFixed(2)}, ${box.min.y.toFixed(2)}, ${box.min.z.toFixed(2)})`,
-                max: `(${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`,
-                width: (box.max.x - box.min.x).toFixed(2),
-                height: (box.max.y - box.min.y).toFixed(2),
-                depth: (box.max.z - box.min.z).toFixed(2)
-            });
-        });
-        console.groupEnd();
-        
-        // Log collision cylinders
-        console.group('🛢️ Collision Cylinders:', this.collisionCylinders.length);
-        this.collisionCylinders.forEach((cylinder, index) => {
-            console.log(`Cylinder ${index}:`, {
-                center: `(${cylinder.center.x.toFixed(2)}, ${cylinder.center.y.toFixed(2)}, ${cylinder.center.z.toFixed(2)})`,
-                radius: cylinder.radius.toFixed(2),
-                height: cylinder.height.toFixed(2)
-            });
-        });
-        console.groupEnd();
-        
-        // Log collision ramps
-        console.group('📐 Collision Ramps:', this.collisionRamps.length);
-        this.collisionRamps.forEach((ramp, index) => {
-            console.log(`Ramp ${index}:`, {
-                position: `(${ramp.position.x.toFixed(2)}, ${ramp.position.y.toFixed(2)}, ${ramp.position.z.toFixed(2)})`,
-                size: `(${ramp.size.x.toFixed(2)}, ${ramp.size.y.toFixed(2)}, ${ramp.size.z.toFixed(2)})`,
-                rotation: `(${ramp.rotation.x.toFixed(2)}, ${ramp.rotation.y.toFixed(2)}, ${ramp.rotation.z.toFixed(2)})`,
-                minHeight: ramp.minHeight.toFixed(2),
-                maxHeight: ramp.maxHeight.toFixed(2)
-            });
-        });
-        console.groupEnd();
-        
-        // Log collision floors
-        console.group('🟦 Collision Floors:', this.collisionFloors.length);
-        this.collisionFloors.forEach((floor, index) => {
-            console.log(`Floor ${index}:`, {
-                position: `(${floor.position.x.toFixed(2)}, ${floor.position.y.toFixed(2)}, ${floor.position.z.toFixed(2)})`,
-                size: `(${floor.size.x.toFixed(2)}, ${floor.size.y.toFixed(2)}, ${floor.size.z.toFixed(2)})`,
-                height: floor.height.toFixed(2)
-            });
-        });
-        console.groupEnd();
-        
-        // Log debug meshes
-        console.group('🟨 Debug Meshes:', this.debugMeshes.length);
-        this.debugMeshes.forEach((mesh, index) => {
-            const material = mesh.material as StandardMaterial;
-            console.log(`Debug Mesh ${index} - ${mesh.name}:`, {
+        // Log collision meshes
+        console.group('🔧 Collision Meshes:', this.collisionMeshes.length);
+        this.collisionMeshes.forEach((mesh, index) => {
+            const bounds = mesh.getBoundingInfo().boundingBox;
+            console.log(`Collision Mesh ${index} - ${mesh.name}:`, {
                 position: `(${mesh.position.x.toFixed(2)}, ${mesh.position.y.toFixed(2)}, ${mesh.position.z.toFixed(2)})`,
+                rotation: `(${mesh.rotation.x.toFixed(2)}, ${mesh.rotation.y.toFixed(2)}, ${mesh.rotation.z.toFixed(2)})`,
+                min: `(${bounds.minimumWorld.x.toFixed(2)}, ${bounds.minimumWorld.y.toFixed(2)}, ${bounds.minimumWorld.z.toFixed(2)})`,
+                max: `(${bounds.maximumWorld.x.toFixed(2)}, ${bounds.maximumWorld.y.toFixed(2)}, ${bounds.maximumWorld.z.toFixed(2)})`,
                 enabled: mesh.isEnabled(),
-                color: material ? material.diffuseColor || material.emissiveColor : 'N/A',
-                type: mesh.name.includes('Box') ? 'Box' : 
-                      mesh.name.includes('Cylinder') ? 'Cylinder' : 
-                      mesh.name.includes('Floor') ? 'Floor' : 'Unknown'
+                visible: mesh.isVisible,
+                checkCollisions: mesh.checkCollisions,
+                metadata: mesh.metadata
             });
         });
         console.groupEnd();
         
-        // Log all meshes with "debug" in their name
-        console.group('🔍 Scene Debug Meshes:');
+        // Log all meshes with collision enabled
+        console.group('🔍 Scene Collision-Enabled Meshes:');
+        let collisionCount = 0;
         this.scene.meshes.forEach(mesh => {
-            if (mesh.name.toLowerCase().includes('debug')) {
-                const material = mesh.material as StandardMaterial;
+            if (mesh.checkCollisions) {
+                collisionCount++;
                 console.log(`${mesh.name}:`, {
                     position: `(${mesh.position.x.toFixed(2)}, ${mesh.position.y.toFixed(2)}, ${mesh.position.z.toFixed(2)})`,
-                    enabled: mesh.isEnabled(),
                     visible: mesh.isVisible,
-                    wireframe: material?.wireframe || false,
-                    color: material ? (material.emissiveColor || material.diffuseColor) : 'N/A'
+                    metadata: mesh.metadata
                 });
             }
         });
+        console.log(`Total collision-enabled meshes: ${collisionCount}`);
         console.groupEnd();
         
         console.groupEnd();
     }
     
     public toggleCollisionDebug(visible: boolean): void {
-        // Toggle visibility of all collision debug meshes (green wireframes)
-        this.scene.meshes.forEach(mesh => {
-            if (mesh.name.includes('debugCollider') || mesh.name.includes('debugFloor')) {
-                mesh.setEnabled(visible);
-            }
-        });
-        console.log(`Collision debug meshes: ${visible ? 'shown' : 'hidden'}`);
+        // Use the new visualization system
+        if (this.townScene) {
+            this.townScene.setDebugVisualizationsEnabled(visible);
+            // Refresh the visualizer to catch any new collision meshes
+            const visualizer = this.townScene.getCollisionVisualizer();
+            visualizer.refresh();
+        }
+        console.log(`Collision visualization: ${visible ? 'enabled' : 'disabled'}`);
+    }
+    
+    public showCollisionStats(): void {
+        if (this.townScene) {
+            const visualizer = this.townScene.getCollisionVisualizer();
+            console.log(visualizer.getDebugInfo());
+        }
     }
     
     public toggleParticles(enabled: boolean): void {
@@ -1547,16 +1348,7 @@ export class HD2DGame {
     
     private createDebugVisuals(): void {
         console.log('Creating debug visuals for HD2DGame...');
-        console.log('Total collision boxes:', this.collisionBoxes.length);
-        console.log('Total collision cylinders:', this.collisionCylinders.length);
-        console.log('Total collision ramps:', this.collisionRamps.length);
-        console.log('Total collision floors:', this.collisionFloors.length);
-        
-        // Skip creating debug boxes - HD2DTownScene already creates them as debugColliderBox
-        // This avoids duplicate red boxes appearing
-        
-        // Skip creating debug cylinders - HD2DTownScene already creates them as debugColliderCylinder
-        // This avoids duplicate yellow cylinders appearing
+        console.log('Total collision meshes:', this.collisionMeshes.length);
         
         // Create player collision line
         const spriteWidth = 3;
@@ -1590,9 +1382,5 @@ export class HD2DGame {
             this.playerDebugLine.position.y = groundPosition.y - defaultPlayerHeight + 0.05;
         }
         
-        // Also update the player collision mesh position to stay in sync
-        if (this.playerCollisionMesh && this.player) {
-            this.playerCollisionMesh.position.copyFrom(this.player.position);
-        }
     }
 }

@@ -27,30 +27,20 @@ import { MeshColliderDecomposer } from '../utils/MeshColliderDecomposer';
 import { ModelRegistry } from '../systems/ModelRegistry';
 import { ModelPositioning } from '../utils/ModelPositioning';
 import { CubeTexture } from '@babylonjs/core/Materials/Textures/cubeTexture';
+import { SimpleCollisionVisualizer } from '../systems/SimpleCollisionVisualizer';
 
 export class HD2DTownScene {
     private scene: Scene;
     private player: HD2DAnimatedSprite;
     private npcs: HD2DSprite[] = [];
-    private collisionBoxes: Array<{min: Vector3, max: Vector3}> = [];
-    private collisionCylinders: Array<{center: Vector3, radius: number, height: number}> = [];
-    private collisionRamps: Array<{
-        position: Vector3,
-        size: Vector3,
-        rotation: Vector3,
-        minHeight: number,
-        maxHeight: number
-    }> = [];
-    private collisionFloors: Array<{
-        position: Vector3,
-        size: Vector3,
-        height: number
-    }> = [];
+    private collisionMeshes: Mesh[] = [];
     private fountainWaterFlow: FountainWaterFlow;
-    private createDebugVisualizations: boolean = true;
+    private createDebugVisualizations: boolean = true; // Debug visualizations on by default
+    private collisionVisualizer: SimpleCollisionVisualizer;
     
     constructor(scene: Scene) {
         this.scene = scene;
+        this.collisionVisualizer = new SimpleCollisionVisualizer(scene);
     }
     
     public async build(): Promise<void> {
@@ -79,7 +69,8 @@ export class HD2DTownScene {
         this.setupCollisions();
         
         // Create fountain water flow after sprites
-        this.fountainWaterFlow = new FountainWaterFlow(this.scene, new Vector3(0, 0, 0));
+        // Position between upper bowl and peak for better arc
+        this.fountainWaterFlow = new FountainWaterFlow(this.scene, new Vector3(0, 1.9, 0));
     }
     
     private createSkybox(): void {
@@ -166,7 +157,6 @@ export class HD2DTownScene {
     private async createBuildings(): Promise<void> {
         // Building positions and sizes from original
         const buildings = [
-            { name: 'shop', pos: new Vector3(10, 0, 10), size: { w: 5, h: 4, d: 4 }, color: new Color3(0.6, 0.5, 0.4) },
             { name: 'inn', pos: new Vector3(0, 0, 15), size: { w: 6, h: 6, d: 5 }, color: new Color3(0.7, 0.6, 0.5) },
             { name: 'house1', pos: new Vector3(-8, 0, -5), size: { w: 3, h: 4, d: 3 }, color: new Color3(0.6, 0.5, 0.4) }
         ];
@@ -233,21 +223,24 @@ export class HD2DTownScene {
         roof.receiveShadows = true;
         roof.renderingGroupId = 1;
         
-        // Add to collision boxes
-        this.collisionBoxes.push({
-            min: new Vector3(
-                data.pos.x - data.size.w/2,
-                0,
-                data.pos.z - data.size.d/2
-            ),
-            max: new Vector3(
-                data.pos.x + data.size.w/2,
-                data.size.h,
-                data.pos.z + data.size.d/2
-            )
-        });
+        // Add collision mesh for building
+        const buildingCollision = CreateBox(`${data.name}_collision`, {
+            width: data.size.w,
+            height: data.size.h,
+            depth: data.size.d
+        }, this.scene);
+        
+        buildingCollision.position = data.pos.clone();
+        buildingCollision.position.y = data.size.h / 2;
+        buildingCollision.isVisible = false; // Always invisible, visualization system handles display
+        buildingCollision.checkCollisions = true;
+        buildingCollision.isPickable = false;
+        
+        this.collisionMeshes.push(buildingCollision);
     }
     
+    // Deprecated: Use ColliderVisualizationSystem instead
+    /*
     private createDebugBox(position: Vector3, size: Vector3, color: Color3): void {
         console.log('Creating debug box:', {
             position: `(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`,
@@ -273,7 +266,10 @@ export class HD2DTownScene {
         debugBox.isPickable = false;
         debugBox.renderingGroupId = 2;
     }
+    */
     
+    // Deprecated: Use ColliderVisualizationSystem instead
+    /*
     private createDebugCylinder(position: Vector3, radius: number, height: number, color: Color3): void {
         console.log('Creating debug cylinder:', {
             position: `(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`,
@@ -300,7 +296,10 @@ export class HD2DTownScene {
         debugCylinder.isPickable = false;
         debugCylinder.renderingGroupId = 2;
     }
+    */
     
+    // Deprecated: Use ColliderVisualizationSystem instead
+    /*
     private createDebugRamp(position: Vector3, size: Vector3, rotation: Vector3, color: Color3): void {
         console.log('Creating debug ramp:', {
             position: `(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`,
@@ -357,6 +356,7 @@ export class HD2DTownScene {
         debugFloor.isPickable = false;
         debugFloor.renderingGroupId = 2;
     }
+    */
     
     
     
@@ -417,70 +417,46 @@ export class HD2DTownScene {
     }
     
     private createFountain(): void {
+        // Fountain will be loaded as a 3D model in create3DProps
         const fountainPos = new Vector3(0, 0, 0);
         
-        // Base
-        const base = CreateCylinder('fountainBase', {
-            diameter: 4,
-            height: 0.5,
-            tessellation: 8
-        }, this.scene);
-        
-        base.position = fountainPos.clone();
-        base.position.y = 0.25;
-        
-        const baseMat = new PBRMaterial('fountainBaseMat', this.scene);
-        baseMat.albedoColor = new Color3(0.6, 0.6, 0.6);
-        baseMat.roughness = 0.7;
-        baseMat.metallic = 0;
-        
-        base.material = baseMat;
-        base.receiveShadows = true;
-        base.renderingGroupId = 1;
-        
-        // Water with animated shader
-        const water = CreateCylinder('water', {
-            diameter: 3.5,
-            height: 0.3,
+        // Create water for the fountain bowl
+        const water = CreateCylinder('fountainWater', {
+            diameter: 3,     // Final diameter adjustment
+            height: 0.1,    // Thinner water surface
             tessellation: 32  // Higher tessellation for wave animation
         }, this.scene);
         
         water.position = fountainPos.clone();
-        water.position.y = 0.5;
+        water.position.y = 0.8;  // Higher up to be in the bowl
         
-        // Use animated water material
-        const waterMat = new AnimatedWaterMaterial('fountainWater', this.scene);
+        // Use animated water material (includes caustics in shader)
+        const waterMat = new AnimatedWaterMaterial('fountainWaterMat', this.scene);
         waterMat.setWaterColors(
-            new Color3(0.4, 0.6, 0.9),  // Shallow color
-            new Color3(0.2, 0.3, 0.6)   // Deep color
+            new Color3(0.4, 0.7, 0.95),  // Lighter shallow color
+            new Color3(0.1, 0.3, 0.6)    // Deeper blue color
         );
-        waterMat.setTransparency(0.8);
-        waterMat.setReflectivity(0.4);
+        waterMat.setTransparency(0.7);
+        waterMat.setReflectivity(0.6);
         
         water.material = waterMat;
         water.receiveShadows = true;
         water.renderingGroupId = 1;
         
-        // Center pillar
-        const pillar = CreateCylinder('fountainPillar', {
-            diameter: 0.5,
-            height: 1.5,
-            tessellation: 6
+        // Create second water surface for upper bowl
+        const upperWater = CreateCylinder('fountainUpperWater', {
+            diameter: 1.1,   // Smaller diameter for upper bowl
+            height: 0.1,     // Same thin water surface
+            tessellation: 32
         }, this.scene);
         
-        pillar.position = fountainPos.clone();
-        pillar.position.y = 1;
-        pillar.material = baseMat;
-        pillar.receiveShadows = true;
-        pillar.renderingGroupId = 1;
+        upperWater.position = fountainPos.clone();
+        upperWater.position.y = 1.75;  // Slightly lower to compensate for wave height
         
-        // Add collision
-        const fountainRadius = 2;
-        const boxSize = fountainRadius * 2 * 0.707;
-        this.collisionBoxes.push({
-            min: new Vector3(-boxSize/2, 0, -boxSize/2),
-            max: new Vector3(boxSize/2, 2, boxSize/2)
-        });
+        // Use the same water material (waves are consistent)
+        upperWater.material = waterMat;
+        upperWater.receiveShadows = true;
+        upperWater.renderingGroupId = 1;
         
         // Water flow will be added after sprites are created
     }
@@ -491,57 +467,41 @@ export class HD2DTownScene {
             new Vector3(5, 0, 0)
         ];
         
-        const lights = this.scene.lights.filter(l => l instanceof DirectionalLight);
-        const shadowGen = lights.length > 0 && (lights[0] as any).shadowGenerator ? 
-            (lights[0] as any).shadowGenerator : null;
-        
         positions.forEach((pos, i) => {
-            // Post
-            const post = CreateCylinder(`lamp${i}Post`, {
-                diameter: 0.2,
-                height: 3,
-                tessellation: 6
+            // Create lamppost sprite
+            const lamppost = new HD2DSprite(`lamppost${i}`, this.scene, {
+                width: 1,     // Width of 1
+                height: 4,    // Taller for lamppost
+                frameWidth: 64,
+                frameHeight: 128
+            });
+            
+            // Load lamppost sprite
+            lamppost.loadSpriteSheet('/assets/sprites/environment/lamppost.png');
+            
+            // Position lamppost (height adjusted so bottom touches ground)
+            lamppost.setPosition(new Vector3(pos.x, 2, pos.z));
+            
+            // Point light at top for lamp glow
+            const lampGlow = new PointLight(`lamp${i}Glow`, 
+                new Vector3(pos.x, 3.5, pos.z), this.scene);
+            lampGlow.diffuse = new Color3(1, 0.9, 0.7);
+            lampGlow.specular = new Color3(1, 0.8, 0.5);
+            lampGlow.intensity = 0.8;
+            lampGlow.range = 10;
+            
+            // Add small collision cylinder for the lamppost base
+            const lampCollision = CreateCylinder(`lamppost_collision_${i}`, {
+                diameter: 0.4,
+                height: 1
             }, this.scene);
             
-            post.position = pos.clone();
-            post.position.y = 1.5;
+            lampCollision.position = new Vector3(pos.x, 0.5, pos.z);
+            lampCollision.isVisible = false; // Always invisible, visualization system handles display
+            lampCollision.checkCollisions = true;
+            lampCollision.isPickable = false;
             
-            const postMat = new PBRMaterial(`lamp${i}PostMat`, this.scene);
-            postMat.albedoColor = new Color3(0.2, 0.2, 0.2);
-            postMat.roughness = 0.3;
-            postMat.metallic = 0.7;
-            
-            post.material = postMat;
-            post.receiveShadows = true;
-            post.renderingGroupId = 1;
-            
-            if (shadowGen) {
-                shadowGen.addShadowCaster(post);
-            }
-            
-            // Lamp
-            const lamp = CreateSphere(`lamp${i}Lamp`, {
-                diameter: 0.6,
-                segments: 8
-            }, this.scene);
-            
-            lamp.position = pos.clone();
-            lamp.position.y = 3.2;
-            
-            const lampMat = new StandardMaterial(`lamp${i}LampMat`, this.scene);
-            lampMat.emissiveColor = new Color3(1, 0.6, 0.2);
-            lampMat.diffuseColor = new Color3(1, 0.6, 0.2);
-            
-            lamp.material = lampMat;
-            lamp.renderingGroupId = 1;
-            
-            // Point light
-            const lampLight = new PointLight(`lamp${i}Light`, 
-                new Vector3(pos.x, 3.2, pos.z), this.scene);
-            lampLight.diffuse = new Color3(1, 0.6, 0.2);
-            lampLight.specular = new Color3(1, 0.5, 0.1);
-            lampLight.intensity = 0.7;
-            lampLight.range = 10;
+            this.collisionMeshes.push(lampCollision);
         });
     }
     
@@ -571,11 +531,11 @@ export class HD2DTownScene {
     
     private async createNPCs(): Promise<void> {
         const npcData = [
-            { name: 'merchant', sprite: 'OT2_202209_PUB01_DOT008.png', pos: new Vector3(8, 0, 7) },
+            { name: 'merchant', sprite: 'OT2_202209_PUB01_DOT008.png', pos: new Vector3(8.5, 0, 5) },
             { name: 'innkeeper', sprite: 'OT2_202209_PUB01_DOT010.png', pos: new Vector3(3, 0, 12) },
             { name: 'scholar', sprite: 'OT2_202209_PUB01_DOT011.png', pos: new Vector3(-5, 0, -3) },
             { name: 'guard', sprite: 'OT2_202209_PUB01_DOT012.png', pos: new Vector3(5, 0, -3) },
-            { name: 'blacksmith', sprite: 'OT2_202209_PUB01_DOT009.png', pos: new Vector3(-8, 0, 8) }
+            { name: 'blacksmith', sprite: 'OT2_202209_PUB01_DOT009.png', pos: new Vector3(-9.5, 0, 8) }
         ];
         
         for (const data of npcData) {
@@ -728,6 +688,66 @@ export class HD2DTownScene {
             console.error('Failed to register alchemist building 2 model:', error);
         }
         
+        // Register marketplace model
+        try {
+            const result = await SceneLoader.LoadAssetContainerAsync(
+                '/assets/models/',
+                'marketplace.glb',
+                this.scene
+            );
+            
+            const rootNode = result.instantiateModelsToScene().rootNodes[0];
+            if (rootNode) {
+                // Reset to origin for registry
+                rootNode.position = Vector3.Zero();
+                rootNode.scaling = Vector3.One();
+                
+                ModelRegistry.getInstance().registerModel(
+                    'marketplace',
+                    '/assets/models/marketplace.glb',
+                    rootNode,
+                    null
+                );
+                
+                // Dispose of this instance since we only needed it for registration
+                rootNode.dispose();
+            }
+            
+            result.dispose();
+        } catch (error) {
+            console.error('Failed to register marketplace model:', error);
+        }
+        
+        // Register fountain model
+        try {
+            const result = await SceneLoader.LoadAssetContainerAsync(
+                '/assets/models/',
+                'fountain.glb',
+                this.scene
+            );
+            
+            const rootNode = result.instantiateModelsToScene().rootNodes[0];
+            if (rootNode) {
+                // Reset to origin for registry
+                rootNode.position = Vector3.Zero();
+                rootNode.scaling = Vector3.One();
+                
+                ModelRegistry.getInstance().registerModel(
+                    'fountain',
+                    '/assets/models/fountain.glb',
+                    rootNode,
+                    null
+                );
+                
+                // Dispose of this instance since we only needed it for registration
+                rootNode.dispose();
+            }
+            
+            result.dispose();
+        } catch (error) {
+            console.error('Failed to register fountain model:', error);
+        }
+        
         // Add other models here as needed
     }
     
@@ -764,14 +784,17 @@ export class HD2DTownScene {
     }
     
     private async create3DProps(): Promise<void> {
+        // Add fountain model at center
+        await this.loadModelWithCollisions('fountain', new Vector3(0, 0, 0), new Vector3(2, 2, 2));
+        
         // Add barrel near the fountain (fountain is at 0,0,0)
         await this.loadModelWithCollisions('barrel', new Vector3(2.5, 0, -2.5), new Vector3(1, 1, 1));
         
         // Add larger barrel at bottom left (negative X, negative Z)
         await this.loadModelWithCollisions('barrel', new Vector3(-15, 0, -15), new Vector3(2, 2, 2));
         
-        // Add blacksmith at specified position with 5x scale
-        await this.loadModelWithCollisions('blacksmith', new Vector3(-10, 0, 10), new Vector3(5, 5, 5));
+        // Add blacksmith at specified position with 5x scale, horizontally flipped and rotated 45 degrees anticlockwise
+        await this.loadModelWithCollisions('blacksmith', new Vector3(-10, 0, 10), new Vector3(-5, 5, 5), -Math.PI / 4);
         
         // Add alchemist buildings to replace the houses on the right
         // First alchemist building at the original house2 position (8, 0, -5), rotated 45 degrees clockwise and horizontally flipped
@@ -779,6 +802,9 @@ export class HD2DTownScene {
         
         // Second alchemist building placed to the right of the first one, rotated 45 degrees clockwise and horizontally flipped
         await this.loadModelWithCollisions('alchemist2', new Vector3(15, 0, -5), new Vector3(-3, 3, 3), Math.PI / 4);
+        
+        // Add marketplace building horizontally flipped, moved back slightly, and rotated 45 degrees clockwise
+        await this.loadModelWithCollisions('marketplace', new Vector3(8.5, 0, 8), new Vector3(-5, 5, 5), Math.PI / 4);
     }
     
     private async loadModelCollisions(modelName: string, modelMesh: Mesh, position: Vector3, yOffset: number = 0, modelScale: Vector3 = new Vector3(1, 1, 1), rotationY: number = 0): Promise<void> {
@@ -827,6 +853,7 @@ export class HD2DTownScene {
                         );
                     }
                     
+                    
                     const colliderPos = ModelPositioning.adjustColliderPosition(
                         rotatedLocalPos,
                         position,
@@ -842,27 +869,20 @@ export class HD2DTownScene {
                         const scaledHeight = colliderData.scale._y * Math.abs(modelScale.y);
                         const scaledDepth = colliderData.scale._z * Math.abs(modelScale.z);
                         
-                        this.collisionBoxes.push({
-                            min: new Vector3(
-                                colliderPos.x - scaledWidth / 2,
-                                colliderPos.y - scaledHeight / 2,
-                                colliderPos.z - scaledDepth / 2
-                            ),
-                            max: new Vector3(
-                                colliderPos.x + scaledWidth / 2,
-                                colliderPos.y + scaledHeight / 2,
-                                colliderPos.z + scaledDepth / 2
-                            )
-                        });
+                        // Create actual collision mesh
+                        const collisionBox = CreateBox(`collision_box_${modelName}_${index}`, {
+                            width: scaledWidth,
+                            height: scaledHeight,
+                            depth: scaledDepth
+                        }, this.scene);
                         
-                        // Debug visualization
-                        if (this.createDebugVisualizations) {
-                            this.createDebugBox(
-                                colliderPos,
-                                new Vector3(scaledWidth, scaledHeight, scaledDepth),
-                                new Color3(1, 0, 0)
-                            );
-                        }
+                        collisionBox.position = colliderPos.clone();
+                        collisionBox.rotation.y = rotationY;
+                        collisionBox.isVisible = false; // Always invisible, visualization system handles display
+                        collisionBox.checkCollisions = true;
+                        collisionBox.isPickable = false;
+                        
+                        this.collisionMeshes.push(collisionBox);
                         
                     } else if (colliderData.type === 'cylinder') {
                         // Check for erroneous walkable cylinders
@@ -881,21 +901,19 @@ export class HD2DTownScene {
                         const scaledRadius = (colliderData.scale._x * Math.abs(modelScale.x)) / 2;
                         const scaledHeight = colliderData.scale._y * Math.abs(modelScale.y);
                         
-                        this.collisionCylinders.push({
-                            center: colliderPos,
-                            radius: scaledRadius,
+                        // Create actual collision mesh
+                        const collisionCylinder = CreateCylinder(`collision_cylinder_${modelName}_${index}`, {
+                            diameter: scaledRadius * 2,
                             height: scaledHeight
-                        });
+                        }, this.scene);
                         
-                        // Debug visualization
-                        if (this.createDebugVisualizations) {
-                            this.createDebugCylinder(
-                                colliderPos,
-                                scaledRadius,
-                                scaledHeight,
-                                new Color3(0, 1, 0)
-                            );
-                        }
+                        collisionCylinder.position = colliderPos.clone();
+                        collisionCylinder.rotation.y = rotationY;
+                        collisionCylinder.isVisible = false; // Always invisible, visualization system handles display
+                        collisionCylinder.checkCollisions = true;
+                        collisionCylinder.isPickable = false;
+                        
+                        this.collisionMeshes.push(collisionCylinder);
                         
                     } else if (colliderData.type === 'ramp') {
                         // Create ramp collider with scaled dimensions
@@ -904,6 +922,7 @@ export class HD2DTownScene {
                         const scaledHeight = colliderData.scale._y * Math.abs(modelScale.y);
                         const scaledDepth = colliderData.scale._z * Math.abs(modelScale.z);
                         
+                        // Add model rotation to ramp rotation
                         const rotation = new Vector3(
                             colliderData.rotation._x,
                             colliderData.rotation._y + rotationY,
@@ -915,23 +934,27 @@ export class HD2DTownScene {
                         const rampMinHeight = colliderPos.y - scaledHeight / 2;
                         const rampMaxHeight = colliderPos.y + scaledHeight / 2;
                         
-                        this.collisionRamps.push({
-                            position: colliderPos,
-                            size: new Vector3(scaledWidth, scaledHeight, scaledDepth),
-                            rotation: rotation,
+                        // Create actual collision mesh for ramp
+                        const collisionRamp = CreateBox(`collision_ramp_${modelName}_${index}`, {
+                            width: scaledWidth,
+                            height: scaledHeight,
+                            depth: scaledDepth
+                        }, this.scene);
+                        
+                        collisionRamp.position = colliderPos.clone();
+                        collisionRamp.rotation = rotation.clone();
+                        collisionRamp.isVisible = false; // Always invisible, visualization system handles display
+                        collisionRamp.checkCollisions = false; // Ramps should not block movement
+                        collisionRamp.isPickable = false;
+                        
+                        // Store ramp data for height calculations
+                        collisionRamp.metadata = {
+                            type: 'ramp',
                             minHeight: rampMinHeight,
                             maxHeight: rampMaxHeight
-                        });
+                        };
                         
-                        // Debug visualization
-                        if (this.createDebugVisualizations) {
-                            this.createDebugRamp(
-                                colliderPos,
-                                new Vector3(scaledWidth, scaledHeight, scaledDepth),
-                                rotation,
-                                new Color3(1, 0, 1) // Magenta
-                            );
-                        }
+                        this.collisionMeshes.push(collisionRamp);
                         
                     } else if (colliderData.type === 'floor') {
                         // Create floor collider with scaled dimensions
@@ -943,25 +966,39 @@ export class HD2DTownScene {
                         // The height should be the absolute Y position of the floor surface
                         const floorHeight = colliderPos.y + (colliderData.height || 0) * Math.abs(modelScale.y);
                         
-                        this.collisionFloors.push({
-                            position: colliderPos,
-                            size: new Vector3(scaledWidth, 0.1, scaledDepth),
-                            height: floorHeight
-                        });
+                        // Create actual collision mesh for floor
+                        const collisionFloor = CreateBox(`collision_floor_${modelName}_${index}`, {
+                            width: scaledWidth,
+                            height: 0.1,
+                            depth: scaledDepth
+                        }, this.scene);
                         
-                        // Debug visualization
-                        if (this.createDebugVisualizations) {
-                            this.createDebugFloor(
-                                colliderPos,
-                                new Vector3(scaledWidth, 0.1, scaledDepth),
-                                floorHeight,
-                                new Color3(0, 0, 1) // Blue
-                            );
-                        }
+                        collisionFloor.position = colliderPos.clone();
+                        collisionFloor.position.y = floorHeight;
+                        collisionFloor.rotation.y = rotationY;
+                        collisionFloor.isVisible = false; // Always invisible, visualization system handles display
+                        collisionFloor.checkCollisions = false; // Floors should not block horizontal movement
+                        collisionFloor.isPickable = false;
+                        
+                        // Store floor data for height calculations
+                        collisionFloor.metadata = {
+                            type: 'floor',
+                            height: colliderData.height || 0  // Store just the height offset, not absolute position
+                        };
+                        
+                        this.collisionMeshes.push(collisionFloor);
                     }
                 });
                 
                 console.log(`Loaded ${setup.colliders.length} colliders for ${modelName} at ${position.toString()}`);
+                
+                // Debug: Log what types of colliders were created
+                const colliderTypes = setup.colliders.reduce((acc: any, collider: any) => {
+                    acc[collider.type] = (acc[collider.type] || 0) + 1;
+                    return acc;
+                }, {});
+                console.log(`Collider breakdown for ${modelName}:`, colliderTypes);
+                
                 return;
             }
         } catch (error) {
@@ -1074,27 +1111,22 @@ export class HD2DTownScene {
     
     
     private setupCollisions(): void {
-        // Collision system will be implemented separately
+        // Set up the collision visualizer with all collision meshes
+        this.collisionVisualizer.setCollisionMeshes(this.collisionMeshes);
+        
+        // Enable visualization by default
+        this.collisionVisualizer.setEnabled(this.createDebugVisualizations);
+        
+        // Log collision mesh count
+        console.log(`Set up collision visualizer with ${this.collisionMeshes.length} collision meshes`);
     }
     
     public getPlayer(): HD2DAnimatedSprite {
         return this.player;
     }
     
-    public getCollisionBoxes(): Array<{min: Vector3, max: Vector3}> {
-        return this.collisionBoxes;
-    }
-    
-    public getCollisionCylinders(): Array<{center: Vector3, radius: number, height: number}> {
-        return this.collisionCylinders;
-    }
-    
-    public getCollisionRamps(): Array<{position: Vector3, size: Vector3, rotation: Vector3, minHeight: number, maxHeight: number}> {
-        return this.collisionRamps;
-    }
-    
-    public getCollisionFloors(): Array<{position: Vector3, size: Vector3, height: number}> {
-        return this.collisionFloors;
+    public getCollisionMeshes(): Mesh[] {
+        return this.collisionMeshes;
     }
     
     public getNPCs(): HD2DSprite[] {
@@ -1107,5 +1139,10 @@ export class HD2DTownScene {
     
     public setDebugVisualizationsEnabled(enabled: boolean): void {
         this.createDebugVisualizations = enabled;
+        this.collisionVisualizer.setEnabled(enabled);
+    }
+    
+    public getCollisionVisualizer(): SimpleCollisionVisualizer {
+        return this.collisionVisualizer;
     }
 }
