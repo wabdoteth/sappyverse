@@ -26,6 +26,7 @@ import { ModelLoader, Props3D } from '../loaders/ModelLoader';
 import { MeshColliderDecomposer } from '../utils/MeshColliderDecomposer';
 import { ModelRegistry } from '../systems/ModelRegistry';
 import { ModelPositioning } from '../utils/ModelPositioning';
+import { CubeTexture } from '@babylonjs/core/Materials/Textures/cubeTexture';
 
 export class HD2DTownScene {
     private scene: Scene;
@@ -53,8 +54,8 @@ export class HD2DTownScene {
     }
     
     public async build(): Promise<void> {
-        // Set scene ambiance
-        this.scene.clearColor = new Color4(0.5, 0.7, 0.9, 1); // Sky blue
+        // Create skybox first
+        this.createSkybox();
         
         // Register models first
         await this.registerModels();
@@ -79,6 +80,36 @@ export class HD2DTownScene {
         
         // Create fountain water flow after sprites
         this.fountainWaterFlow = new FountainWaterFlow(this.scene, new Vector3(0, 0, 0));
+    }
+    
+    private createSkybox(): void {
+        // Create skybox sphere for proper spherical mapping
+        const skybox = CreateSphere('skyBox', { 
+            diameter: 1000,
+            segments: 32
+        }, this.scene);
+        
+        // Create skybox material
+        const skyboxMaterial = new StandardMaterial('skyBoxMat', this.scene);
+        skyboxMaterial.backFaceCulling = false;
+        skyboxMaterial.disableLighting = true;
+        
+        // Load the skybox texture
+        const skyTexture = new Texture('/assets/skyboxes/sky_31_2k.png', this.scene);
+        skyTexture.coordinatesMode = Texture.SPHERICAL_MODE;
+        skyTexture.vScale = -1; // Flip texture vertically to correct orientation
+        
+        // Apply texture as emissive for self-illumination
+        skyboxMaterial.emissiveTexture = skyTexture;
+        skyboxMaterial.diffuseColor = new Color3(0, 0, 0);
+        skyboxMaterial.specularColor = new Color3(0, 0, 0);
+        
+        // Apply to skybox
+        skybox.material = skyboxMaterial;
+        skybox.position.y = -200; // Lower the skybox to bring details into view
+        skybox.infiniteDistance = true;
+        skybox.renderingGroupId = 0; // Render before everything else
+        skybox.isPickable = false;
     }
     
     private createGround(): void {
@@ -137,8 +168,7 @@ export class HD2DTownScene {
         const buildings = [
             { name: 'shop', pos: new Vector3(10, 0, 10), size: { w: 5, h: 4, d: 4 }, color: new Color3(0.6, 0.5, 0.4) },
             { name: 'inn', pos: new Vector3(0, 0, 15), size: { w: 6, h: 6, d: 5 }, color: new Color3(0.7, 0.6, 0.5) },
-            { name: 'house1', pos: new Vector3(-8, 0, -5), size: { w: 3, h: 4, d: 3 }, color: new Color3(0.6, 0.5, 0.4) },
-            { name: 'house2', pos: new Vector3(8, 0, -5), size: { w: 3, h: 4, d: 3 }, color: new Color3(0.5, 0.5, 0.4) }
+            { name: 'house1', pos: new Vector3(-8, 0, -5), size: { w: 3, h: 4, d: 3 }, color: new Color3(0.6, 0.5, 0.4) }
         ];
         
         // Create procedural buildings
@@ -544,7 +574,8 @@ export class HD2DTownScene {
             { name: 'merchant', sprite: 'OT2_202209_PUB01_DOT008.png', pos: new Vector3(8, 0, 7) },
             { name: 'innkeeper', sprite: 'OT2_202209_PUB01_DOT010.png', pos: new Vector3(3, 0, 12) },
             { name: 'scholar', sprite: 'OT2_202209_PUB01_DOT011.png', pos: new Vector3(-5, 0, -3) },
-            { name: 'guard', sprite: 'OT2_202209_PUB01_DOT012.png', pos: new Vector3(5, 0, -3) }
+            { name: 'guard', sprite: 'OT2_202209_PUB01_DOT012.png', pos: new Vector3(5, 0, -3) },
+            { name: 'blacksmith', sprite: 'OT2_202209_PUB01_DOT009.png', pos: new Vector3(-8, 0, 8) }
         ];
         
         for (const data of npcData) {
@@ -637,6 +668,66 @@ export class HD2DTownScene {
             console.error('Failed to register blacksmith model:', error);
         }
         
+        // Register alchemist building 1 model
+        try {
+            const result = await SceneLoader.LoadAssetContainerAsync(
+                '/assets/models/',
+                'alchemist_building_1.glb',
+                this.scene
+            );
+            
+            const rootNode = result.instantiateModelsToScene().rootNodes[0];
+            if (rootNode) {
+                // Reset to origin for registry
+                rootNode.position = Vector3.Zero();
+                rootNode.scaling = Vector3.One();
+                
+                ModelRegistry.getInstance().registerModel(
+                    'alchemist1',
+                    '/assets/models/alchemist_building_1.glb',
+                    rootNode,
+                    null
+                );
+                
+                // Dispose of this instance since we only needed it for registration
+                rootNode.dispose();
+            }
+            
+            result.dispose();
+        } catch (error) {
+            console.error('Failed to register alchemist building 1 model:', error);
+        }
+        
+        // Register alchemist building 2 model
+        try {
+            const result = await SceneLoader.LoadAssetContainerAsync(
+                '/assets/models/',
+                'alchemist_building_2.glb',
+                this.scene
+            );
+            
+            const rootNode = result.instantiateModelsToScene().rootNodes[0];
+            if (rootNode) {
+                // Reset to origin for registry
+                rootNode.position = Vector3.Zero();
+                rootNode.scaling = Vector3.One();
+                
+                ModelRegistry.getInstance().registerModel(
+                    'alchemist2',
+                    '/assets/models/alchemist_building_2.glb',
+                    rootNode,
+                    null
+                );
+                
+                // Dispose of this instance since we only needed it for registration
+                rootNode.dispose();
+            }
+            
+            result.dispose();
+        } catch (error) {
+            console.error('Failed to register alchemist building 2 model:', error);
+        }
+        
         // Add other models here as needed
     }
     
@@ -681,9 +772,16 @@ export class HD2DTownScene {
         
         // Add blacksmith at specified position with 5x scale
         await this.loadModelWithCollisions('blacksmith', new Vector3(-10, 0, 10), new Vector3(5, 5, 5));
+        
+        // Add alchemist buildings to replace the houses on the right
+        // First alchemist building at the original house2 position (8, 0, -5), rotated 45 degrees clockwise and horizontally flipped
+        await this.loadModelWithCollisions('alchemist1', new Vector3(8, 0, -5), new Vector3(-3, 3, 3), Math.PI / 4);
+        
+        // Second alchemist building placed to the right of the first one, rotated 45 degrees clockwise and horizontally flipped
+        await this.loadModelWithCollisions('alchemist2', new Vector3(15, 0, -5), new Vector3(-3, 3, 3), Math.PI / 4);
     }
     
-    private async loadModelCollisions(modelName: string, modelMesh: Mesh, position: Vector3, yOffset: number = 0, modelScale: Vector3 = new Vector3(1, 1, 1)): Promise<void> {
+    private async loadModelCollisions(modelName: string, modelMesh: Mesh, position: Vector3, yOffset: number = 0, modelScale: Vector3 = new Vector3(1, 1, 1), rotationY: number = 0): Promise<void> {
         // Disable mesh-based collision, use primitive colliders instead
         modelMesh.checkCollisions = false;
         
@@ -717,8 +815,20 @@ export class HD2DTownScene {
                         colliderData.position._z
                     );
                     
+                    // Apply rotation to the local position if needed
+                    let rotatedLocalPos = colliderLocalPos;
+                    if (rotationY !== 0) {
+                        const cos = Math.cos(rotationY);
+                        const sin = Math.sin(rotationY);
+                        rotatedLocalPos = new Vector3(
+                            colliderLocalPos.x * cos - colliderLocalPos.z * sin,
+                            colliderLocalPos.y,
+                            colliderLocalPos.x * sin + colliderLocalPos.z * cos
+                        );
+                    }
+                    
                     const colliderPos = ModelPositioning.adjustColliderPosition(
-                        colliderLocalPos,
+                        rotatedLocalPos,
                         position,
                         yOffset,
                         modelScale
@@ -727,9 +837,10 @@ export class HD2DTownScene {
                     
                     if (colliderData.type === 'box') {
                         // Create box collider with scaled dimensions
-                        const scaledWidth = colliderData.scale._x * modelScale.x;
-                        const scaledHeight = colliderData.scale._y * modelScale.y;
-                        const scaledDepth = colliderData.scale._z * modelScale.z;
+                        // Use absolute values to handle negative scaling (mirroring)
+                        const scaledWidth = colliderData.scale._x * Math.abs(modelScale.x);
+                        const scaledHeight = colliderData.scale._y * Math.abs(modelScale.y);
+                        const scaledDepth = colliderData.scale._z * Math.abs(modelScale.z);
                         
                         this.collisionBoxes.push({
                             min: new Vector3(
@@ -766,8 +877,9 @@ export class HD2DTownScene {
                         }
                         
                         // Create cylinder collider with scaled dimensions
-                        const scaledRadius = (colliderData.scale._x * modelScale.x) / 2;
-                        const scaledHeight = colliderData.scale._y * modelScale.y;
+                        // Use absolute value for radius to handle negative scaling (mirroring)
+                        const scaledRadius = (colliderData.scale._x * Math.abs(modelScale.x)) / 2;
+                        const scaledHeight = colliderData.scale._y * Math.abs(modelScale.y);
                         
                         this.collisionCylinders.push({
                             center: colliderPos,
@@ -787,13 +899,14 @@ export class HD2DTownScene {
                         
                     } else if (colliderData.type === 'ramp') {
                         // Create ramp collider with scaled dimensions
-                        const scaledWidth = colliderData.scale._x * modelScale.x;
-                        const scaledHeight = colliderData.scale._y * modelScale.y;
-                        const scaledDepth = colliderData.scale._z * modelScale.z;
+                        // Use absolute values to handle negative scaling (mirroring)
+                        const scaledWidth = colliderData.scale._x * Math.abs(modelScale.x);
+                        const scaledHeight = colliderData.scale._y * Math.abs(modelScale.y);
+                        const scaledDepth = colliderData.scale._z * Math.abs(modelScale.z);
                         
                         const rotation = new Vector3(
                             colliderData.rotation._x,
-                            colliderData.rotation._y,
+                            colliderData.rotation._y + rotationY,
                             colliderData.rotation._z
                         );
                         
@@ -822,12 +935,13 @@ export class HD2DTownScene {
                         
                     } else if (colliderData.type === 'floor') {
                         // Create floor collider with scaled dimensions
-                        const scaledWidth = colliderData.scale._x * modelScale.x;
-                        const scaledDepth = colliderData.scale._z * modelScale.z;
+                        // Use absolute values to handle negative scaling (mirroring)
+                        const scaledWidth = colliderData.scale._x * Math.abs(modelScale.x);
+                        const scaledDepth = colliderData.scale._z * Math.abs(modelScale.z);
                         
                         // Get the floor height from collider data, scaled by model scale
                         // The height should be the absolute Y position of the floor surface
-                        const floorHeight = colliderPos.y + (colliderData.height || 0) * modelScale.y;
+                        const floorHeight = colliderPos.y + (colliderData.height || 0) * Math.abs(modelScale.y);
                         
                         this.collisionFloors.push({
                             position: colliderPos,
@@ -860,7 +974,7 @@ export class HD2DTownScene {
         }
     }
     
-    private async loadModelWithCollisions(modelName: string, position: Vector3, scale: Vector3 = new Vector3(1, 1, 1)): Promise<void> {
+    private async loadModelWithCollisions(modelName: string, position: Vector3, scale: Vector3 = new Vector3(1, 1, 1), rotationY: number = 0): Promise<void> {
         try {
             // Get model data from registry
             const modelData = ModelRegistry.getInstance().getModel(modelName);
@@ -897,15 +1011,38 @@ export class HD2DTownScene {
             let yOffset = 0; // Track the Y offset for collisions
             
             if (rootNode) {
+                // Create a parent transform node for rotation if needed
+                let parentNode = rootNode;
+                if (rotationY !== 0) {
+                    parentNode = new TransformNode(`${modelName}_rotationParent`, this.scene);
+                    parentNode.position = position;
+                    parentNode.rotation.y = rotationY;
+                    
+                    console.log(`Applying rotation to ${modelName}: ${rotationY} radians (${rotationY * 180 / Math.PI} degrees)`);
+                    
+                    // Parent the model to our rotation node
+                    rootNode.parent = parentNode;
+                    rootNode.position = Vector3.Zero(); // Reset local position
+                }
+                
                 // Apply scale
                 rootNode.scaling = scale;
                 
                 // Position model on ground using shared utility
-                yOffset = ModelPositioning.positionModelOnGround(
-                    rootNode,
-                    mainMesh,
-                    position
-                );
+                if (rotationY === 0) {
+                    yOffset = ModelPositioning.positionModelOnGround(
+                        rootNode,
+                        mainMesh,
+                        position
+                    );
+                } else {
+                    // For rotated models, position at origin then use parent's position
+                    yOffset = ModelPositioning.positionModelOnGround(
+                        rootNode,
+                        mainMesh,
+                        Vector3.Zero()
+                    );
+                }
             }
             
             // Set rendering properties
@@ -922,7 +1059,10 @@ export class HD2DTownScene {
             // Load collision data for the model
             if (mainMesh && rootNode) {
                 // Pass the Y offset so collisions can be adjusted the same way
-                await this.loadModelCollisions(modelName, mainMesh, rootNode.position, yOffset, scale);
+                // Use the parent node position if we created one for rotation
+                const collisionPosition = rootNode.parent instanceof TransformNode ? 
+                    rootNode.parent.position : rootNode.position;
+                await this.loadModelCollisions(modelName, mainMesh, collisionPosition, yOffset, scale, rotationY);
             }
             
             

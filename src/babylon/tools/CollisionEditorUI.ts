@@ -754,7 +754,8 @@ export class CollisionEditorUI {
             dropdownList.isVisible = !dropdownList.isVisible;
             if (dropdownList.isVisible) {
                 this.refreshModelList();
-                this.gui.moveToTop(dropdownList);
+                // Move dropdown to top of rendering order
+                this.gui.rootContainer.moveToTop(dropdownList);
             }
         });
         

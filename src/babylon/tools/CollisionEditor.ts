@@ -92,6 +92,11 @@ export class CollisionEditor {
                 this.gizmoManager.attachToMesh(this.selectedCollider);
             }
             setTimeout(() => this.controls.setupScaleConstraints(), 100);
+        } else if (toolId === 'rotate') {
+            // Disable rotation matching for non-uniform scaled meshes
+            if (this.gizmoManager.gizmos.rotationGizmo) {
+                this.gizmoManager.gizmos.rotationGizmo.updateGizmoRotationToMatchAttachedMesh = false;
+            }
         }
         
         // Update UI
@@ -173,6 +178,13 @@ export class CollisionEditor {
             this.gizmoManager.positionGizmoEnabled = false;
             this.gizmoManager.scaleGizmoEnabled = false;
             this.gizmoManager.rotationGizmoEnabled = true;
+            
+            // Disable rotation matching for non-uniform scaled meshes
+            setTimeout(() => {
+                if (this.gizmoManager.gizmos.rotationGizmo) {
+                    this.gizmoManager.gizmos.rotationGizmo.updateGizmoRotationToMatchAttachedMesh = false;
+                }
+            }, 100);
         } else {
             this.gizmoManager.rotationGizmoEnabled = false;
             this.gizmoManager.scaleGizmoEnabled = false;

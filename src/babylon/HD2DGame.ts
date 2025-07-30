@@ -32,7 +32,6 @@ import { ExecuteCodeAction } from '@babylonjs/core/Actions/directActions';
 import { HD2DTownScene } from './scenes/HD2DTownScene';
 import { HD2DAnimatedSprite } from './HD2DAnimatedSprite';
 import { HD2DParticles } from './effects/HD2DParticles';
-import { ParallaxBackground } from './effects/ParallaxBackground';
 import { SpriteOutlineSimple } from './effects/SpriteOutlineSimple';
 import { HD2DOutlineSystem } from './materials/HD2DOutlineMaterial';
 import { TimeOfDaySystem } from './systems/TimeOfDaySystem';
@@ -167,7 +166,6 @@ export class HD2DGame {
     
     // Effects
     private hd2dParticles: HD2DParticles;
-    private parallaxBackground: ParallaxBackground;
     private spriteOutline: SpriteOutlineSimple;
     private hd2dOutlineSystem: HD2DOutlineSystem;
     
@@ -265,9 +263,6 @@ export class HD2DGame {
     }
     
     private setupPixelPerfectRendering(): void {
-        // Set scene background
-        this.scene.clearColor = new Color4(0.5, 0.7, 0.9, 1); // Bright sky blue background
-        
         // Configure engine for pixel art
         // this.engine.setHardwareScalingLevel(1 / HD2D_CONFIG.PIXEL_SCALE);
         
@@ -332,12 +327,6 @@ export class HD2DGame {
     
     private async createTownScene(): Promise<void> {
         console.log('Loading HD-2D Town Scene...');
-        
-        // Create parallax background first
-        this.parallaxBackground = new ParallaxBackground(this.scene, this.mainCamera);
-        this.parallaxBackground.createSkyLayer();
-        this.parallaxBackground.createCloudLayer();
-        this.parallaxBackground.createMountainLayer();
         
         // Create town scene
         this.townScene = new HD2DTownScene(this.scene);
@@ -459,9 +448,6 @@ export class HD2DGame {
         this.scene.registerBeforeRender(() => {
             this.update();
             this.updateDebugVisuals();
-            if (this.parallaxBackground) {
-                this.parallaxBackground.update();
-            }
         });
     }
     
