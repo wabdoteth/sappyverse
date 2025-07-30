@@ -833,27 +833,20 @@ export class HD2DGame {
             // Check if position is within ramp bounds
             const halfSize = new Vector3(ramp.size.x / 2, ramp.size.y / 2, ramp.size.z / 2);
             
-            // For now, assume ramps are axis-aligned (we'll handle rotation later)
-            // Check X and Z bounds
-            if (position.x >= ramp.position.x - halfSize.x && position.x <= ramp.position.x + halfSize.x &&
-                position.z >= ramp.position.z - halfSize.z && position.z <= ramp.position.z + halfSize.z) {
+            // Transform player position to ramp's local space to check bounds
+            const localPos = position.subtract(ramp.position);
+            const cos = Math.cos(-ramp.rotation.y);
+            const sin = Math.sin(-ramp.rotation.y);
+            const localX = localPos.x * cos - localPos.z * sin;
+            const localZ = localPos.x * sin + localPos.z * cos;
+            
+            // Check if we're within the ramp's local bounds
+            if (Math.abs(localX) <= halfSize.x && Math.abs(localZ) <= halfSize.z) {
                 
                 // Calculate height based on position on ramp
-                // Determine ramp direction based on rotation
-                let ratio = 0;
-                
-                // Check primary rotation axis
-                if (Math.abs(ramp.rotation.y) < 0.1) {
-                    // Ramp aligned with Z axis (default)
-                    // REVERSED: Going from +Z to -Z (north to south) goes up
-                    ratio = 1 - ((position.z - (ramp.position.z - halfSize.z)) / ramp.size.z);
-                } else if (Math.abs(ramp.rotation.y - Math.PI/2) < 0.1 || Math.abs(ramp.rotation.y + Math.PI/2) < 0.1) {
-                    // Ramp rotated 90 degrees, aligned with X axis
-                    ratio = (position.x - (ramp.position.x - halfSize.x)) / ramp.size.x;
-                } else if (Math.abs(ramp.rotation.y - Math.PI) < 0.1) {
-                    // Ramp rotated 180 degrees (reversed Z)
-                    ratio = (position.z - (ramp.position.z - halfSize.z)) / ramp.size.z;
-                }
+                // Calculate ratio based on local Z position (ramps go up along local Z axis)
+                let ratio = (localZ + halfSize.z) / ramp.size.z;
+                ratio = Math.max(0, Math.min(1, ratio)); // Clamp between 0 and 1
                 
                 // For ramps, the "bottom" is actually at the lower edge, not the center
                 // So we need to adjust our height calculation
